@@ -34,6 +34,7 @@ func (wb *WriteBatch) SetCF(cf string, key, val []byte) {
 	wb.size += len(key) + len(val)
 }
 
+// 将删除操作添加到 WriteBatch 中，以便批量删除存储引擎中的元数据
 func (wb *WriteBatch) DeleteMeta(key []byte) {
 	wb.entries = append(wb.entries, &badger.Entry{
 		Key: key,
@@ -48,15 +49,19 @@ func (wb *WriteBatch) DeleteCF(cf string, key []byte) {
 	wb.size += len(key)
 }
 
+// 将元数据（如日志条目）写入 WriteBatch 中，以便批量写入到存储引擎中
 func (wb *WriteBatch) SetMeta(key []byte, msg proto.Message) error {
+	// 序列化消息
 	val, err := proto.Marshal(msg)
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	// 添加条目到 entries 切片
 	wb.entries = append(wb.entries, &badger.Entry{
 		Key:   key,
 		Value: val,
 	})
+	// 更新批次大小
 	wb.size += len(key) + len(val)
 	return nil
 }

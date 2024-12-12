@@ -794,7 +794,7 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 		if err != nil {
 			// 通知回调region已经被移除
 			NotifyReqRegionRemoved(d.regionId, cb)
-			return
+			// return
 		}
 	}
 
@@ -813,7 +813,6 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 	success := d.peer.Propose(d.ctx.engine.Raft, d.ctx.cfg, cb, msg, resp)
 	if !success {
 		log.Warn(fmt.Sprintf("[region %d] Propose failed", d.regionId))
-		cb.Done(resp) // 返回预构造的错误响应
 		return
 	}
 
