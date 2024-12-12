@@ -175,6 +175,7 @@ func (rn *RawNode) Step(m pb.Message) error {
 }
 
 // Ready returns the current point-in-time state of this RawNode.
+// 生成一个 Ready 结构体，该结构体包含了当前 Raft 节点的状态和需要处理的消息
 func (rn *RawNode) Ready() Ready {
 	rd := newReady(rn.Raft, rn.prevSoftSt, rn.prevHardSt)
 	rn.Raft.msgs = nil
@@ -201,20 +202,28 @@ func (rn *RawNode) HasReady() bool {
 
 // Advance notifies the RawNode that the application has applied and saved progress in the
 // last Ready results.
+// 通知 RawNode 应用程序已经应用并保存了上一次 Ready 结果中的进度
 func (rn *RawNode) Advance(rd Ready) {
+	// 如果 Ready 结构体中的 SoftState 不为空，则更新 RawNode 的 prevSoftSt 字段为新的软状态
 	if rd.SoftState != nil {
 		rn.prevSoftSt = rd.SoftState
 	}
+	// 如果 Ready 结构体中的 HardState 不为空，则更新 RawNode 的 prevHardSt 字段为新的硬状态
 	if !IsEmptyHardState(rd.HardState) {
 		rn.prevHardSt = rd.HardState
 	}
+	// 如果 prevHardSt 中的 Commit 字段不为 0，则将已应用的日志索引更新到 Commit 索引
 	if rn.prevHardSt.Commit != 0 {
 		rn.Raft.RaftLog.appliedTo(rn.prevHardSt.Commit)
 	}
+	// 已稳定”指的是日志条目已经被持久化到存储中，并且不会再被覆盖或丢失
+	// 具体来说，日志条目已经被写入到持久化存储（如磁盘）中，并且在节点重启或故障恢复后仍然存在
+	// 如果 Ready 结构体中的 Entries 列表不为空，则将已稳定的日志条目更新到该日志条目的索引和任期
 	if len(rd.Entries) > 0 {
 		e := rd.Entries[len(rd.Entries)-1]
 		rn.Raft.RaftLog.stableTo(e.Index, e.Term)
 	}
+	// 如果 Ready 结构体中的 Snapshot 不为空，则将已稳定的快照索引更新到快照的元数据索引
 	if !IsEmptySnap(&rd.Snapshot) {
 		rn.Raft.RaftLog.stableSnapTo(rd.Snapshot.Metadata.Index)
 	}
