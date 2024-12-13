@@ -1351,9 +1351,13 @@ type CheckTxnStatusResponse struct {
 	// locked: lock_ttl > 0
 	// committed: commit_version > 0
 	// rolled back: lock_ttl == 0 && commit_version == 0
-	LockTtl       uint64 `protobuf:"varint,2,opt,name=lock_ttl,json=lockTtl,proto3" json:"lock_ttl,omitempty"`
+
+	// 锁的生成时间
+	LockTtl uint64 `protobuf:"varint,2,opt,name=lock_ttl,json=lockTtl,proto3" json:"lock_ttl,omitempty"`
+	// 事务的提交版本。如果事务已经提交，该字段将包含提交的版本号。
 	CommitVersion uint64 `protobuf:"varint,3,opt,name=commit_version,json=commitVersion,proto3" json:"commit_version,omitempty"`
 	// The action performed by TinyKV in response to the CheckTxnStatus request.
+	// TinyKV 在响应 CheckTxnStatus 请求时执行的操作
 	Action               Action   `protobuf:"varint,4,opt,name=action,proto3,enum=kvrpcpb.Action" json:"action,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`

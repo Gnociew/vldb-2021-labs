@@ -136,6 +136,7 @@ func TestRollbackOtherTxn4C(t *testing.T) {
 }
 
 // TestCheckTxnStatusTtlExpired4C checks that if there is a lock and its ttl has expired, then it is rolled back.
+// 测试在事务状态检查中，如果存在锁且其 TTL 已过期，则该锁会被回滚
 func TestCheckTxnStatusTtlExpired4C(t *testing.T) {
 	builder := newBuilder(t)
 	cmd := builder.checkTxnStatusRequest([]byte{3})
@@ -145,8 +146,11 @@ func TestCheckTxnStatusTtlExpired4C(t *testing.T) {
 	})
 	resp := builder.runOneRequest(cmd).(*kvrpcpb.CheckTxnStatusResponse)
 
+	// 断言响应中的 RegionError 字段为 nil
 	assert.Nil(t, resp.RegionError)
+	// 断言响应中的 Action 字段为 TTLExpireRollback，表示锁已过期并进行了回滚操作
 	assert.Equal(t, kvrpcpb.Action_TTLExpireRollback, resp.Action)
+	// 断言数据库中 CfDefault 列族有 0 个键，CfLock 列族有 0 个键，CfWrite 列族有 1 个键
 	builder.assertLens(0, 0, 1)
 	builder.assert([]kv{
 		{cf: engine_util.CfWrite, key: []byte{3}, ts: cmd.LockTs, value: []byte{3, 0, 0, 5, 0, 0, 0, 0, builder.ts()}},
