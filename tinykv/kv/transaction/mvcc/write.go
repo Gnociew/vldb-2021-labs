@@ -55,6 +55,7 @@ func (wk WriteKind) ToProto() kvrpcpb.Op {
 	return -1
 }
 
+// 将 kvrpcpb.Op 类型的操作转换为 WriteKind 类型
 func WriteKindFromProto(op kvrpcpb.Op) WriteKind {
 	switch op {
 	case kvrpcpb.Op_Put:

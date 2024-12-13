@@ -743,6 +743,8 @@ func (m *GetResponse) GetNotFound() bool {
 // writes (mutations) which a client would like to make as part of a transaction. The
 // request succeeds if none of the keys are locked. In that case all those keys will
 // be locked. If the prewrite fails, no changes are made to the DB.
+// Prewrite 是两阶段提交的第一阶段。一个预写提交包含客户端希望作为事务一部分进行的所有写入（变更）。
+// 如果没有任何键被锁定，请求成功。在这种情况下，所有这些键将被锁定。如果预写失败，则不会对数据库进行任何更改。
 type PrewriteRequest struct {
 	Context   *Context    `protobuf:"bytes,1,opt,name=context" json:"context,omitempty"`
 	Mutations []*Mutation `protobuf:"bytes,2,rep,name=mutations" json:"mutations,omitempty"`
@@ -1608,6 +1610,7 @@ func (m *KvPair) GetValue() []byte {
 }
 
 type Mutation struct {
+	// 变更的操作类型
 	Op                   Op       `protobuf:"varint,1,opt,name=op,proto3,enum=kvrpcpb.Op" json:"op,omitempty"`
 	Key                  []byte   `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
 	Value                []byte   `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`

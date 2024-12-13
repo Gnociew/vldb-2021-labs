@@ -219,6 +219,8 @@ func (txn *MvccTxn) PutWrite(key []byte, ts uint64, write *Write) {
 
 // GetLock returns a lock if key is locked. It will return (nil, nil) if there is no lock on key, and (nil, err)
 // if an error occurs during lookup.
+// 获取指定键上的锁
+// 如果数据存在，则解析数据并返回锁对象；如果数据不存在或读取/解析过程中发生错误，则返回相应的错误或 nil
 func (txn *RoTxn) GetLock(key []byte) (*Lock, error) {
 	bytes, err := txn.Reader.GetCF(engine_util.CfLock, key)
 	if err != nil {

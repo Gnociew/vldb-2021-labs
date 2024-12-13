@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/hex"
+
 	"github.com/pingcap-incubator/tinykv/kv/transaction/mvcc"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 	"github.com/pingcap/log"
@@ -25,6 +26,25 @@ func NewResolveLock(request *kvrpcpb.ResolveLockRequest) ResolveLock {
 }
 
 func (rl *ResolveLock) PrepareWrites(txn *mvcc.MvccTxn) (interface{}, error) {
+	// // A map from start timestamps to commit timestamps which tells us whether a transaction (identified by start ts)
+	// // has been committed (and if so, then its commit ts) or rolled back (in which case the commit ts is 0).
+	// commitTs := rl.request.CommitVersion
+	// response := new(kvrpcpb.ResolveLockResponse)
+
+	// log.Info("There keys to resolve",
+	// 	zap.Uint64("lockTS", txn.StartTS),
+	// 	zap.Int("number", len(rl.keyLocks)),
+	// 	zap.Uint64("commit_ts", commitTs))
+	// panic("ResolveLock is not implemented yet")
+	// for _, kl := range rl.keyLocks {
+	// 	// YOUR CODE HERE (lab2).
+	// 	// Try to commit the key if the transaction is committed already, or try to rollback the key if it's not.
+	// 	// The `commitKey` and `rollbackKey` functions could be useful.
+	// 	log.Debug("resolve key", zap.String("key", hex.EncodeToString(kl.Key)))
+	// }
+
+	// return response, nil
+
 	// A map from start timestamps to commit timestamps which tells us whether a transaction (identified by start ts)
 	// has been committed (and if so, then its commit ts) or rolled back (in which case the commit ts is 0).
 	commitTs := rl.request.CommitVersion
@@ -34,11 +54,23 @@ func (rl *ResolveLock) PrepareWrites(txn *mvcc.MvccTxn) (interface{}, error) {
 		zap.Uint64("lockTS", txn.StartTS),
 		zap.Int("number", len(rl.keyLocks)),
 		zap.Uint64("commit_ts", commitTs))
-	panic("ResolveLock is not implemented yet")
 	for _, kl := range rl.keyLocks {
 		// YOUR CODE HERE (lab2).
 		// Try to commit the key if the transaction is committed already, or try to rollback the key if it's not.
 		// The `commitKey` and `rollbackKey` functions could be useful.
+		if commitTs > 0 {
+			// 提交
+			_, err := commitKey(kl.Key, commitTs, txn, response)
+			if err != nil {
+				return nil, err
+			}
+		} else if commitTs == 0 {
+			// 回滚
+			_, err := rollbackKey(kl.Key, txn, response)
+			if err != nil {
+				return nil, err
+			}
+		}
 		log.Debug("resolve key", zap.String("key", hex.EncodeToString(kl.Key)))
 	}
 

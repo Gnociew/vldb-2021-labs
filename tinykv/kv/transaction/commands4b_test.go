@@ -61,6 +61,7 @@ func TestGetValueTs4B(t *testing.T) {
 }
 
 // TestGetEmpty4B tests that get on an empty DB.
+// 测试在一个空数据库上执行 get 操作
 func TestGetEmpty4B(t *testing.T) {
 	builder := newBuilder(t)
 
@@ -69,12 +70,14 @@ func TestGetEmpty4B(t *testing.T) {
 	req.Version = mvcc.TsMax
 	resp := builder.runOneRequest(&req).(*kvrpcpb.GetResponse)
 
-	assert.Nil(t, resp.RegionError)
-	assert.Nil(t, resp.Error)
-	assert.True(t, resp.NotFound)
+	assert.Nil(t, resp.RegionError) // 断言响应中没有 RegionError
+	assert.Nil(t, resp.Error)       // 断言响应中没有 Error
+	assert.True(t, resp.NotFound)   // 断言响应中 NotFound 为 true
 }
 
 // TestGetNone4B tests that getting a missing key works.
+// 函数测试在一个数据库中执行 Get 操作时，目标键不存在的情况。
+// 具体来说，它验证了在数据库中存在其他键的情况下，查询一个不存在的键时，响应中没有错误，并且 NotFound 字段为 true
 func TestGetNone4B(t *testing.T) {
 	builder := newBuilder(t)
 	builder.init([]kv{
