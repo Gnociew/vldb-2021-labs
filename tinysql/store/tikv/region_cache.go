@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// 定义了 TiKV 中的区域缓存（Region Cache）逻辑。
+// 区域缓存用于缓存 TiKV 集群中的区域信息，以便快速定位和访问数据。
+
 package tikv
 
 import (
@@ -35,11 +38,12 @@ import (
 )
 
 const (
-	btreeDegree               = 32
-	invalidatedLastAccessTime = -1
+	btreeDegree               = 32 // B-树的度数，用于区域缓存中的 B-树结构
+	invalidatedLastAccessTime = -1 // 无效的最后访问时间，用于标记区域缓存中的无效条目
 )
 
 // RegionCacheTTLSec is the max idle time for regions in the region cache.
+// 区域缓存的最大空闲时间（以秒为单位），用于控制区域缓存的生存时间
 const RegionCacheTTLSec int64 = 600
 
 const (
@@ -64,6 +68,7 @@ type RegionStore struct {
 }
 
 // clone clones region store struct.
+// 克隆一个 RegionStore 对象
 func (r *RegionStore) clone() *RegionStore {
 	storeFails := make([]uint32, len(r.stores))
 	copy(storeFails, r.storeFails)
@@ -75,6 +80,8 @@ func (r *RegionStore) clone() *RegionStore {
 }
 
 // return next follower store's index
+// 返回下一个存储的索引，它不是当前正在工作的存储节点 (workTiKVIdx)。
+// follower 方法的目的是在多个存储节点中找到一个有效的 follower 存储节点，并避免选择当前的工作存储节点。
 func (r *RegionStore) follower(seed uint32) int32 {
 	l := uint32(len(r.stores))
 	if l <= 1 {
@@ -95,6 +102,7 @@ func (r *RegionStore) follower(seed uint32) int32 {
 }
 
 // init initializes region after constructed.
+// 初始化一个 Region 对象
 func (r *Region) init(c *RegionCache) {
 	// region store pull used store from global store map
 	// to avoid acquire storeMu in later access.
@@ -119,15 +127,20 @@ func (r *Region) init(c *RegionCache) {
 	r.lastAccess = time.Now().Unix()
 }
 
+// 使用原子操作从 r.store 中加载一个指向 RegionStore 的指针，并返回该指针。
+// 它确保在多线程环境中安全地读取 r.store。
 func (r *Region) getStore() (store *RegionStore) {
 	store = (*RegionStore)(atomic.LoadPointer(&r.store))
 	return
 }
 
+// 使用原子操作比较并交换 r.store 的值（实际存储节点的信息）。
+// 如果 r.store 当前的值是 oldStore，则将其替换为 newStore，并返回 true；否则返回 false
 func (r *Region) compareAndSwapStore(oldStore, newStore *RegionStore) bool {
 	return atomic.CompareAndSwapPointer(&r.store, unsafe.Pointer(oldStore), unsafe.Pointer(newStore))
 }
 
+// 检查 Region 的缓存是否过期
 func (r *Region) checkRegionCacheTTL(ts int64) bool {
 	for {
 		lastAccess := atomic.LoadInt64(&r.lastAccess)
@@ -141,11 +154,14 @@ func (r *Region) checkRegionCacheTTL(ts int64) bool {
 }
 
 // invalidate invalidates a region, next time it will got null result.
+// 使 Region 无效
 func (r *Region) invalidate() {
 	atomic.StoreInt64(&r.lastAccess, invalidatedLastAccessTime)
 }
 
 // scheduleReload schedules reload region request in next LocateKey.
+// 计划在下次 LocateKey 时重新加载 Region
+// LocateKey 用于在分布式存储系统中定位特定键所在的 Region。
 func (r *Region) scheduleReload() {
 	oldValue := atomic.LoadInt32(&r.syncFlag)
 	if oldValue != updated {
@@ -155,6 +171,7 @@ func (r *Region) scheduleReload() {
 }
 
 // needReload checks whether region need reload.
+// 检查 Region 是否需要重新加载
 func (r *Region) needReload() bool {
 	oldValue := atomic.LoadInt32(&r.syncFlag)
 	if oldValue == updated {
@@ -164,20 +181,24 @@ func (r *Region) needReload() bool {
 }
 
 // RegionCache caches Regions loaded from PD.
+// 存储从 PD（Placement Driver）加载的 Region 信息
+// PD：管理和调度整个集群的元数据，包括 Region 的分布、负载均衡、故障恢复等
 type RegionCache struct {
-	pdClient pd.Client
+	pdClient pd.Client // 用于与 PD 通信的客户端
 
+	// 互斥锁保护的结构体，包含缓存的 Region 信息
 	mu struct {
 		sync.RWMutex                         // mutex protect cached region
 		regions      map[RegionVerID]*Region // cached regions be organized as regionVerID to region ref mapping
 		sorted       *btree.BTree            // cache regions be organized as sorted key to region ref mapping
 	}
+	// 互斥锁保护的结构体，包含缓存的存储节点信息
 	storeMu struct {
 		sync.RWMutex
 		stores map[uint64]*Store
 	}
-	notifyCheckCh chan struct{}
-	closeCh       chan struct{}
+	notifyCheckCh chan struct{} // 通道，用于通知检查存储节点
+	closeCh       chan struct{} // 通道，用于关闭缓存
 }
 
 // NewRegionCache creates a RegionCache.
@@ -195,11 +216,17 @@ func NewRegionCache(pdClient pd.Client) *RegionCache {
 }
 
 // Close releases region cache's resource.
+// 关闭 closeCh 通道，释放 RegionCache 的资源
 func (c *RegionCache) Close() {
 	close(c.closeCh)
 }
 
 // asyncCheckAndResolveLoop with
+// 异步循环，用于检查和解析存储节点的地址。
+// 它监听 closeCh 和 notifyCheckCh 通道：
+//
+//	如果收到 closeCh 的信号，循环终止。
+//	如果收到 notifyCheckCh 的信号，调用 checkAndResolve 函数检查和解析存储节点。
 func (c *RegionCache) asyncCheckAndResolveLoop() {
 	var needCheckStores []*Store
 	for {
@@ -215,6 +242,7 @@ func (c *RegionCache) asyncCheckAndResolveLoop() {
 
 // checkAndResolve checks and resolve addr of failed stores.
 // this method isn't thread-safe and only be used by one goroutine.
+// 检查和解析失败的存储节点的地址
 func (c *RegionCache) checkAndResolve(needCheckStores []*Store) {
 	defer func() {
 		r := recover()
@@ -240,6 +268,11 @@ func (c *RegionCache) checkAndResolve(needCheckStores []*Store) {
 }
 
 // RPCContext contains data that is needed to send RPC to a region.
+// 包含发送 RPC 请求到某个 Region 所需的数据
+// RPC（Remote Procedure Call，远程过程调用）请求是一种通过网络从一台计算机调用另一台计算机上的函数或方法的技术。
+// RPC 使得开发者可以像调用本地函数一样调用远程函数，而不需要关心底层的网络通信细节。
+// 在分布式系统中，RPC 请求通常用于客户端与服务器之间的通信。
+// 例如，在 TiKV 分布式存储系统中，客户端可能需要通过 RPC 请求与存储节点进行交互，以执行读写操作。
 type RPCContext struct {
 	Region  RegionVerID
 	Meta    *metapb.Region
@@ -250,6 +283,7 @@ type RPCContext struct {
 }
 
 // GetStoreID returns StoreID.
+// 返回 RPCContext 中存储节点的 ID
 func (c *RPCContext) GetStoreID() uint64 {
 	if c.Store != nil {
 		return c.Store.storeID
@@ -257,6 +291,7 @@ func (c *RPCContext) GetStoreID() uint64 {
 	return 0
 }
 
+// 返回 RPCContext 的字符串表示形式
 func (c *RPCContext) String() string {
 	return fmt.Sprintf("region ID: %d, meta: %s, peer: %s, addr: %s, idx: %d",
 		c.Region.GetID(), c.Meta, c.Peer, c.Addr, c.PeerIdx)
@@ -264,6 +299,8 @@ func (c *RPCContext) String() string {
 
 // GetTiKVRPCContext returns RPCContext for a region. If it returns nil, the region
 // must be out of date and already dropped from cache.
+// 返回指定 Region 的 RPCContext
+// 如果返回 nil，表示该 Region 已过期并从缓存中删除
 func (c *RegionCache) GetTiKVRPCContext(bo *Backoffer, id RegionVerID, replicaRead kv.ReplicaReadType, followerStoreSeed uint32) (*RPCContext, error) {
 	ts := time.Now().Unix()
 
@@ -322,6 +359,7 @@ func (c *RegionCache) GetTiKVRPCContext(bo *Backoffer, id RegionVerID, replicaRe
 }
 
 // KeyLocation is the region and range that a key is located.
+// 表示一个键所在的 Region 和范围
 type KeyLocation struct {
 	Region   RegionVerID
 	StartKey kv.Key
@@ -329,12 +367,15 @@ type KeyLocation struct {
 }
 
 // Contains checks if key is in [StartKey, EndKey).
+// 检查一个键是否在 KeyLocation 的范围内
+// KeyLocation 是一个结构体，用于表示一个键所在的 Region 和范围
 func (l *KeyLocation) Contains(key []byte) bool {
 	return bytes.Compare(l.StartKey, key) <= 0 &&
 		(bytes.Compare(key, l.EndKey) < 0 || len(l.EndKey) == 0)
 }
 
 // LocateKey searches for the region and range that the key is located.
+// 查找包含指定键的 Region 和范围
 func (c *RegionCache) LocateKey(bo *Backoffer, key []byte) (*KeyLocation, error) {
 	r, err := c.findRegionByKey(bo, key, false)
 	if err != nil {
@@ -349,6 +390,7 @@ func (c *RegionCache) LocateKey(bo *Backoffer, key []byte) (*KeyLocation, error)
 
 // LocateEndKey searches for the region and range that the key is located.
 // Unlike LocateKey, start key of a region is exclusive and end key is inclusive.
+// 查找包含指定键的 Region 和范围，与 LocateKey 不同的是，Region 的起始键是排他的，结束键是包容的
 func (c *RegionCache) LocateEndKey(bo *Backoffer, key []byte) (*KeyLocation, error) {
 	r, err := c.findRegionByKey(bo, key, true)
 	if err != nil {
@@ -361,6 +403,7 @@ func (c *RegionCache) LocateEndKey(bo *Backoffer, key []byte) (*KeyLocation, err
 	}, nil
 }
 
+// 根据键查找 Region，如果缓存中没有或需要重新加载，则从 PD 加载。
 func (c *RegionCache) findRegionByKey(bo *Backoffer, key []byte, isEndKey bool) (r *Region, err error) {
 	r = c.searchCachedRegion(key, isEndKey)
 	if r == nil {
@@ -392,6 +435,7 @@ func (c *RegionCache) findRegionByKey(bo *Backoffer, key []byte, isEndKey bool) 
 }
 
 // OnSendFail handles send request fail logic.
+// 处理发送请求失败的逻辑
 func (c *RegionCache) OnSendFail(bo *Backoffer, ctx *RPCContext, scheduleReload bool, err error) {
 	r := c.getCachedRegionWithRLock(ctx.Region)
 	if r != nil {
@@ -407,6 +451,7 @@ func (c *RegionCache) OnSendFail(bo *Backoffer, ctx *RPCContext, scheduleReload 
 }
 
 // LocateRegionByID searches for the region with ID.
+// 根据 Region ID 查找 Region 和范围
 func (c *RegionCache) LocateRegionByID(bo *Backoffer, regionID uint64) (*KeyLocation, error) {
 	c.mu.RLock()
 	r := c.getRegionByIDFromCache(regionID)
@@ -455,13 +500,52 @@ func (c *RegionCache) LocateRegionByID(bo *Backoffer, regionID uint64) (*KeyLoca
 // The return values are the separated groups, first region and error
 //
 // Help function `RegionCache.LocateKey`
+
+// GroupKeysByRegion 将键按所属的 Region 分组。
+// 特别地，它还返回第一个键的 Region，该 Region 可能被用作 'PrimaryLockKey'，应该优先提交。
+// filter 用于过滤一些不需要的键。
+// 返回值是分组后的键，第一个 Region 和错误信息。
+//
+// 帮助函数 `RegionCache.LocateKey`
 func (c *RegionCache) GroupKeysByRegion(bo *Backoffer, keys [][]byte, filter func(key, regionStartKey []byte) bool) (map[RegionVerID][][]byte, RegionVerID, error) {
 	// YOUR CODE HERE (lab3).
-	panic("YOUR CODE HERE")
-	return nil, RegionVerID{}, nil
+	// panic("YOUR CODE HERE")
+	// return nil, RegionVerID{}, nil
+
+	// 创建一个空的 groups 映射，用于存储按 Region 分组的键
+	groups := make(map[RegionVerID][][]byte)
+	// 记录第一个键的 Region
+	var firstRegionID RegionVerID
+	var firstRegionSet bool
+
+	// 遍历所有的键
+	for _, key := range keys {
+		// LocateKey 函数的作用是查找包含指定键的 Region 和范围。
+		// 它首先会在缓存中查找，如果缓存中没有找到或者缓存中的数据无效，则会从 PD（Placement Driver）加载最新的 Region 信息
+		// 故不存在缓存无效的情况
+		loc, err := c.LocateKey(bo, key)
+		if err != nil {
+			return nil, RegionVerID{}, err
+		}
+
+		if filter != nil && filter(key, loc.StartKey) {
+			break
+		}
+
+		regionID := loc.Region
+		if !firstRegionSet {
+			firstRegionID = regionID
+			firstRegionSet = true
+		}
+
+		groups[regionID] = append(groups[regionID], key)
+	}
+
+	return groups, firstRegionID, nil
 }
 
 // ListRegionIDsInKeyRange lists ids of regions in [start_key,end_key].
+// 列出指定键范围 [startKey, endKey] 内的所有 Region 的 ID
 func (c *RegionCache) ListRegionIDsInKeyRange(bo *Backoffer, startKey, endKey []byte) (regionIDs []uint64, err error) {
 	for {
 		curRegion, err := c.LocateKey(bo, startKey)
@@ -478,6 +562,7 @@ func (c *RegionCache) ListRegionIDsInKeyRange(bo *Backoffer, startKey, endKey []
 }
 
 // LoadRegionsInKeyRange lists ids of regions in [start_key,end_key].
+// 加载指定键范围 [startKey, endKey] 内的所有 Region，并将其插入缓存
 func (c *RegionCache) LoadRegionsInKeyRange(bo *Backoffer, startKey, endKey []byte) (regions []*Region, err error) {
 	for {
 		curRegion, err := c.loadRegion(bo, startKey, false)
@@ -500,6 +585,7 @@ func (c *RegionCache) LoadRegionsInKeyRange(bo *Backoffer, startKey, endKey []by
 // BatchLoadRegionsFromKey loads at most given numbers of regions to the RegionCache, from the given startKey. Returns
 // the endKey of the last loaded region. If some of the regions has no leader, their entries in RegionCache will not be
 // updated.
+// 从指定的 startKey 开始，批量加载最多 count 个 Region 到缓存中，并返回最后一个加载的 Region 的 endKey
 func (c *RegionCache) BatchLoadRegionsFromKey(bo *Backoffer, startKey []byte, count int) ([]byte, error) {
 	regions, err := c.scanRegions(bo, startKey, count)
 	if err != nil {
@@ -520,6 +606,7 @@ func (c *RegionCache) BatchLoadRegionsFromKey(bo *Backoffer, startKey []byte, co
 }
 
 // InvalidateCachedRegion removes a cached Region.
+// 使指定的 Region 缓存无效
 func (c *RegionCache) InvalidateCachedRegion(id RegionVerID) {
 	cachedRegion := c.getCachedRegionWithRLock(id)
 	if cachedRegion == nil {
@@ -529,6 +616,7 @@ func (c *RegionCache) InvalidateCachedRegion(id RegionVerID) {
 }
 
 // UpdateLeader update some region cache with newer leader info.
+// 更新指定 Region 的领导者信息
 func (c *RegionCache) UpdateLeader(regionID RegionVerID, leaderStoreID uint64, currentPeerIdx int) {
 	r := c.getCachedRegionWithRLock(regionID)
 	if r == nil {
@@ -561,6 +649,7 @@ func (c *RegionCache) UpdateLeader(regionID RegionVerID, leaderStoreID uint64, c
 }
 
 // insertRegionToCache tries to insert the Region to cache.
+// 尝试将 Region 插入缓存
 func (c *RegionCache) insertRegionToCache(cachedRegion *Region) {
 	old := c.mu.sorted.ReplaceOrInsert(newBtreeItem(cachedRegion))
 	if old != nil {
@@ -574,6 +663,7 @@ func (c *RegionCache) insertRegionToCache(cachedRegion *Region) {
 // used after c.mu is RUnlock().
 // If the given key is the end key of the region that you want, you may set the second argument to true. This is useful
 // when processing in reverse order.
+// 通过键从缓存中查找 Region
 func (c *RegionCache) searchCachedRegion(key []byte, isEndKey bool) *Region {
 	ts := time.Now().Unix()
 	var r *Region
@@ -600,6 +690,7 @@ func (c *RegionCache) searchCachedRegion(key []byte, isEndKey bool) *Region {
 // getRegionByIDFromCache tries to get region by regionID from cache. Like
 // `getCachedRegion`, it should be called with c.mu.RLock(), and the returned
 // Region should not be used after c.mu is RUnlock().
+// 通过 regionID 从缓存中获取 Region
 func (c *RegionCache) getRegionByIDFromCache(regionID uint64) *Region {
 	for v, r := range c.mu.regions {
 		if v.id == regionID {
@@ -612,6 +703,7 @@ func (c *RegionCache) getRegionByIDFromCache(regionID uint64) *Region {
 // loadRegion loads region from pd client, and picks the first peer as leader.
 // If the given key is the end key of the region that you want, you may set the second argument to true. This is useful
 // when processing in reverse order.
+// 从 PD 客户端加载 Region，并选择第一个节点作为领导者
 func (c *RegionCache) loadRegion(bo *Backoffer, key []byte, isEndKey bool) (*Region, error) {
 	var backoffErr error
 	searchPrev := false
@@ -655,6 +747,7 @@ func (c *RegionCache) loadRegion(bo *Backoffer, key []byte, isEndKey bool) (*Reg
 }
 
 // loadRegionByID loads region from pd client, and picks the first peer as leader.
+// 通过 regionID 从 PD 客户端加载 Region，并选择第一个节点作为领导者
 func (c *RegionCache) loadRegionByID(bo *Backoffer, regionID uint64) (*Region, error) {
 	var backoffErr error
 	for {
@@ -687,6 +780,8 @@ func (c *RegionCache) loadRegionByID(bo *Backoffer, regionID uint64) (*Region, e
 
 // scanRegions scans at most `limit` regions from PD, starts from the region containing `startKey` and in key order.
 // Regions with no leader will not be returned.
+// 从 PD 扫描最多 limit 个 Region，从包含 startKey 的 Region 开始，按键顺序扫描。
+// 没有领导者的 Region 不会被返回
 func (c *RegionCache) scanRegions(bo *Backoffer, startKey []byte, limit int) ([]*Region, error) {
 	if limit == 0 {
 		return nil, nil
@@ -738,6 +833,7 @@ func (c *RegionCache) scanRegions(bo *Backoffer, startKey []byte, limit int) ([]
 	}
 }
 
+// 通过 regionID 获取缓存的 Region，使用读锁保护
 func (c *RegionCache) getCachedRegionWithRLock(regionID RegionVerID) (r *Region) {
 	c.mu.RLock()
 	r = c.mu.regions[regionID]
@@ -745,6 +841,7 @@ func (c *RegionCache) getCachedRegionWithRLock(regionID RegionVerID) (r *Region)
 	return
 }
 
+// 获取存储节点的地址，根据存储节点的解析状态进行不同的处理
 func (c *RegionCache) getStoreAddr(bo *Backoffer, region *Region, store *Store, storeIdx int) (addr string, err error) {
 	state := store.getResolveState()
 	switch state {
@@ -762,6 +859,7 @@ func (c *RegionCache) getStoreAddr(bo *Backoffer, region *Region, store *Store, 
 	}
 }
 
+// 将存储节点切换为活动状态，并更新 Region 的存储信息
 func (c *RegionCache) changeToActiveStore(region *Region, store *Store, storeIdx int) (addr string) {
 	c.storeMu.RLock()
 	store = c.storeMu.stores[store.storeID]
@@ -785,6 +883,7 @@ func (c *RegionCache) changeToActiveStore(region *Region, store *Store, storeIdx
 	return
 }
 
+// 通过 storeID 获取存储节点，如果不存在则创建新的存储节点
 func (c *RegionCache) getStoreByStoreID(storeID uint64) (store *Store) {
 	var ok bool
 	c.storeMu.Lock()
@@ -800,6 +899,7 @@ func (c *RegionCache) getStoreByStoreID(storeID uint64) (store *Store) {
 }
 
 // OnRegionEpochNotMatch removes the old region and inserts new regions into the cache.
+// 处理 Region 版本不匹配的情况，移除旧的 Region 并插入新的 Region 到缓存中
 func (c *RegionCache) OnRegionEpochNotMatch(bo *Backoffer, ctx *RPCContext, currentRegions []*metapb.Region) error {
 	// Find whether the region epoch in `ctx` is ahead of TiKV's. If so, backoff.
 	for _, meta := range currentRegions {
@@ -840,16 +940,19 @@ func (c *RegionCache) OnRegionEpochNotMatch(bo *Backoffer, ctx *RPCContext, curr
 }
 
 // PDClient returns the pd.Client in RegionCache.
+// 返回 RegionCache 中的 PD 客户端
 func (c *RegionCache) PDClient() pd.Client {
 	return c.pdClient
 }
 
 // btreeItem is BTree's Item that uses []byte to compare.
+// 用于 B 树的项，使用 []byte 进行比较。它包含一个键和一个缓存的 Region
 type btreeItem struct {
 	key          []byte
 	cachedRegion *Region
 }
 
+// 创建一个新的 btreeItem，用于插入 B 树
 func newBtreeItem(cr *Region) *btreeItem {
 	return &btreeItem{
 		key:          cr.StartKey(),
@@ -857,12 +960,14 @@ func newBtreeItem(cr *Region) *btreeItem {
 	}
 }
 
+// 创建一个新的 btreeItem，用于在 B 树中查找
 func newBtreeSearchItem(key []byte) *btreeItem {
 	return &btreeItem{
 		key: key,
 	}
 }
 
+// 用于比较两个 btreeItem 的键，以确定它们在 B 树中的顺序
 func (item *btreeItem) Less(other btree.Item) bool {
 	return bytes.Compare(item.key, other.(*btreeItem).key) < 0
 }
@@ -895,6 +1000,7 @@ func (r *Region) GetLeaderStoreID() uint64 {
 	return r.meta.Peers[int(r.getStore().workTiKVIdx)].StoreId
 }
 
+// 返回指定索引的存储节点和对应的副本
 func (r *Region) getStorePeer(rs *RegionStore, pidx int32) (store *Store, peer *metapb.Peer, idx int) {
 	store = rs.stores[pidx]
 	peer = r.meta.Peers[pidx]
@@ -903,16 +1009,19 @@ func (r *Region) getStorePeer(rs *RegionStore, pidx int32) (store *Store, peer *
 }
 
 // WorkStorePeer returns current work store with work peer.
+// 返回当前工作的存储节点和对应的副本
 func (r *Region) WorkStorePeer(rs *RegionStore) (store *Store, peer *metapb.Peer, idx int) {
 	return r.getStorePeer(rs, rs.workTiKVIdx)
 }
 
 // FollowerStorePeer returns a follower store with follower peer.
+// 返回一个 follower 存储节点和对应的副本
 func (r *Region) FollowerStorePeer(rs *RegionStore, followerStoreSeed uint32) (*Store, *metapb.Peer, int) {
 	return r.getStorePeer(rs, rs.follower(followerStoreSeed))
 }
 
 // RegionVerID is a unique ID that can identify a Region at a specific version.
+// 唯一标识特定版本的 Region 的 ID
 type RegionVerID struct {
 	// Region id
 	id uint64
@@ -948,12 +1057,14 @@ func (r *Region) EndKey() []byte {
 
 // switchToPeer switches current store to the one on specific store. It returns
 // false if no peer matches the storeID.
+// 将当前存储节点切换到指定的存储节点。如果没有匹配的副本，则返回 false
 func (c *RegionCache) switchToPeer(r *Region, targetStoreID uint64) (found bool) {
 	leaderIdx, found := c.getPeerStoreIndex(r, targetStoreID)
 	c.switchWorkIdx(r, leaderIdx)
 	return
 }
 
+// 将当前存储节点切换到下一个副本
 func (c *RegionCache) switchNextPeer(r *Region, currentPeerIdx int, err error) {
 	rs := r.getStore()
 
@@ -976,6 +1087,7 @@ func (c *RegionCache) switchNextPeer(r *Region, currentPeerIdx int, err error) {
 	r.compareAndSwapStore(rs, newRegionStore)
 }
 
+// 获取指定存储节点 ID 的副本索引
 func (c *RegionCache) getPeerStoreIndex(r *Region, id uint64) (idx int, found bool) {
 	if len(r.meta.Peers) == 0 {
 		return
@@ -990,6 +1102,7 @@ func (c *RegionCache) getPeerStoreIndex(r *Region, id uint64) (idx int, found bo
 	return
 }
 
+// 将当前工作存储节点切换到新的领导者
 func (c *RegionCache) switchWorkIdx(r *Region, leaderIdx int) {
 retry:
 	// switch to new leader.
@@ -1020,6 +1133,7 @@ func (r *Region) ContainsByEnd(key []byte) bool {
 }
 
 // Store contains a kv process's address.
+// 包含存储节点的地址、ID、状态等信息
 type Store struct {
 	addr         string     // loaded store address
 	storeID      uint64     // store's id
@@ -1038,6 +1152,7 @@ const (
 )
 
 // initResolve resolves addr for store that never resolved.
+// 解析从未解析过的存储节点地址
 func (s *Store) initResolve(bo *Backoffer, c *RegionCache) (addr string, err error) {
 	s.resolveMutex.Lock()
 	state := s.getResolveState()
@@ -1079,6 +1194,7 @@ func (s *Store) initResolve(bo *Backoffer, c *RegionCache) (addr string, err err
 }
 
 // reResolve try to resolve addr for store that need check.
+// 尝试解析需要检查的存储节点地址
 func (s *Store) reResolve(c *RegionCache) {
 	var addr string
 	store, err := c.pdClient.GetStore(context.Background(), s.storeID)
@@ -1126,6 +1242,7 @@ retryMarkResolved:
 	}
 }
 
+// 获取存储节点的解析状态
 func (s *Store) getResolveState() resolveState {
 	var state resolveState
 	if s == nil {
@@ -1134,11 +1251,13 @@ func (s *Store) getResolveState() resolveState {
 	return resolveState(atomic.LoadUint64(&s.state))
 }
 
+// 比较并交换存储节点的解析状态
 func (s *Store) compareAndSwapState(oldState, newState resolveState) bool {
 	return atomic.CompareAndSwapUint64(&s.state, uint64(oldState), uint64(newState))
 }
 
 // markNeedCheck marks resolved store to be async resolve to check store addr change.
+// 标记已解析的存储节点，以异步解析检查存储节点地址的变化
 func (s *Store) markNeedCheck(notifyCheckCh chan struct{}) {
 retry:
 	oldState := s.getResolveState()
