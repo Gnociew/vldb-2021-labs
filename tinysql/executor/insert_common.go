@@ -309,11 +309,11 @@ func (e *InsertValues) fastEvalRow(ctx context.Context, list []expression.Expres
 
 // setValueForRefColumn set some default values for the row to eval the row value with other columns,
 // it follows these rules:
-//     1. for nullable and no default value column, use NULL.
-//     2. for nullable and have default value column, use it's default value.
-//     3. for not null column, use zero value even in strict mode.
-//     4. for auto_increment column, use zero value.
-//     5. for generated column, use NULL.
+//  1. for nullable and no default value column, use NULL.
+//  2. for nullable and have default value column, use it's default value.
+//  3. for not null column, use zero value even in strict mode.
+//  4. for auto_increment column, use zero value.
+//  5. for generated column, use NULL.
 func (e *InsertValues) setValueForRefColumn(row []types.Datum, hasValue []bool) error {
 	for i, c := range e.Table.Cols() {
 		d, err := e.getColDefaultValue(i, c)
@@ -668,7 +668,9 @@ func (e *InsertValues) addRecord(ctx context.Context, row []types.Datum) (int64,
 	var recordID int64
 	// Hint: step II.5
 	// YOUR CODE HERE (lab4)
-	panic("YOUR CODE HERE")
+	// panic("YOUR CODE HERE")
+	// 输入的一行数据通过 TableCommon.AddRecord 函数写入到 membuffer 当中
+	recordID, err = e.Table.AddRecord(e.ctx, row, table.WithCtx(ctx))
 	txn.DelOption(kv.PresumeKeyNotExists)
 	if err != nil {
 		return 0, err

@@ -586,7 +586,9 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 
 	// Hint: step I.3.1
 	// YOUR CODE HERE (lab4)
-	panic("YOUR CODE HERE")
+	// panic("YOUR CODE HERE")
+	// 调用 Parser，可以将文本解析成结构化数据，也就是抽象语法树 （AST）
+	stmtNodes, warns, err = s.ParseSQL(ctx, sql, charsetInfo, collation)
 	if err != nil {
 		s.rollbackOnError(ctx)
 		logutil.Logger(ctx).Warn("parse SQL failed",
@@ -615,7 +617,10 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 		var stmt *executor.ExecStmt
 		// Hint: step I.3.2
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// 拿到 AST 之后，就可以做各种验证、变化、优化，这一系列动作的入口在这里
+		// 将一颗语法树进行优化，依次生成逻辑执行计划和物理执行计划
+		stmt, err := compiler.Compile(ctx, stmtNode)
 		if stmt != nil {
 			logutil.Logger(ctx).Debug("stmt", zap.String("sql", stmt.Text))
 		}
@@ -633,7 +638,9 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 
 		// Hint: step I.3.3
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// 执行物理执行计划
+		recordSets, err = s.executeStatement(ctx, connID, stmtNode, stmt, recordSets, multiQuery)
 		if err != nil {
 			return nil, err
 		}

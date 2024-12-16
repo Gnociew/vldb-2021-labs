@@ -599,7 +599,9 @@ func (cc *clientConn) Run(ctx context.Context) {
 
 		// Hint: step I.2
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// 调用 dispatch() 方法处理收到的请求
+		err = cc.dispatch(ctx, data)
 		if err != nil {
 			if terror.ErrorEqual(err, io.EOF) {
 
@@ -698,7 +700,9 @@ func (cc *clientConn) dispatch(ctx context.Context, data []byte) error {
 		var err error
 		// Hint: step I.2
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// 对于 Command Query，从客户端发送来的主要是 SQL 文本，处理函数是 handleQuery() :
+		err = cc.handleQuery(ctx, dataStr)
 		return err
 	case mysql.ComPing:
 		return cc.writeOK()
@@ -828,7 +832,8 @@ func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
 	var rss []ResultSet
 	// Hint: step I.3
 	// YOUR CODE HERE (lab4)
-	panic("YOUR CODE HERE")
+	// panic("YOUR CODE HERE")
+	rss, err = cc.ctx.Execute(ctx, sql)
 
 	if err != nil {
 		return err
@@ -946,7 +951,9 @@ func (cc *clientConn) writeChunks(ctx context.Context, rs ResultSet, binary bool
 		// Here server.tidbResultSet implements Next method.
 		// Hint: step I.4.4
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// 调用执行器的 Next 函数，返回一条数据
+		err = rs.Next(ctx, req)
 		if err != nil {
 			return err
 		}

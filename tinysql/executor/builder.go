@@ -249,7 +249,9 @@ func (b *executorBuilder) buildInsert(v *plannercore.Insert) Executor {
 	var err error
 	// Hint: step II.1
 	// YOUR CODE HERE (lab4)
-	panic("YOUR CODE HERE")
+	// panic("YOUR CODE HERE")
+	// 生成执行所需要涉及到的 Columns 信息
+	err = ivs.initInsertColumns()
 	if err != nil {
 		b.err = err
 		return nil
@@ -560,7 +562,9 @@ func (b *executorBuilder) buildProjection(v *plannercore.PhysicalProjection) Exe
 	var childExec Executor
 	// Hint: step III.1
 	// YOUR CODE HERE (lab4)
-	panic("YOUR CODE HERE")
+	// panic("YOUR CODE HERE")
+	// 对下层的结果进行处理，所以有 children，这里会递归的调用 executorBuilder.build 函数来 build 子 Executor
+	childExec = b.build(v.Children()[0])
 	if b.err != nil {
 		return nil
 	}

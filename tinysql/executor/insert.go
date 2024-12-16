@@ -45,7 +45,9 @@ func (e *InsertExec) exec(ctx context.Context, rows [][]types.Datum) error {
 		var err error
 		// Hint: step II.4
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// 每行数据都会使用被组合的 InsertValues.addRecord 进行写入
+		_, err = e.addRecord(ctx, row)
 		if err != nil {
 			return err
 		}
@@ -60,12 +62,16 @@ func (e *InsertExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	if len(e.children) > 0 && e.children[0] != nil {
 		// Hint: step II.3.2
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// 根据 Select 的 Insert 会使用 insertRowsFromSelect 函数进行处理
+		err = insertRowsFromSelect(ctx, e)
 		return err
 	}
 	// Hint: step II.3.1
 	// YOUR CODE HERE (lab4)
-	panic("YOUR CODE HERE")
+	// panic("YOUR CODE HERE")
+	// 普通的 Insert 会使用 insertRows 函数进行处理
+	err = insertRows(ctx, e)
 	return err
 }
 
@@ -84,7 +90,9 @@ func (e *InsertExec) Open(ctx context.Context) error {
 		var err error
 		// Hint: step II.2
 		// YOUR CODE HERE (lab4)
-		panic("YOUR CODE HERE")
+		// panic("YOUR CODE HERE")
+		// Insert 中嵌入了一条 Select 语句
+		err = e.SelectExec.Open(ctx)
 		return err
 	}
 	if !e.allAssignmentsAreConstant {

@@ -41,12 +41,12 @@ const (
 
 // tikvSnapshot implements the kv.Snapshot interface.
 type tikvSnapshot struct {
-	store   *TinykvStore
-	version kv.Version
-	syncLog bool
-	keyOnly bool
-	vars    *kv.Variables
-	minCommitTSPushed
+	store             *TinykvStore  // 指向 TinykvStore 的指针，表示快照所属的存储
+	version           kv.Version    // 快照的版本
+	syncLog           bool          // 是否同步日志
+	keyOnly           bool          // 是否只获取 key，不获取 value
+	vars              *kv.Variables // 事务变量
+	minCommitTSPushed               // 记录已经推进的最小事务时间戳
 
 	// Cache the result of BatchGet.
 	// The invariance is that calling BatchGet multiple times using the same start ts,
@@ -55,7 +55,7 @@ type tikvSnapshot struct {
 	// cached use len(value)=0 to represent a key-value entry doesn't exist (a reliable truth from TiKV).
 	// In the BatchGet API, it use no key-value entry to represent non-exist.
 	// It's OK as long as there are no zero-byte values in the protocol.
-	cached map[string][]byte
+	cached map[string][]byte // 缓存 BatchGet 的结果。使用 len(value)=0 表示键值对不存在
 }
 
 // newTiKVSnapshot creates a snapshot of an TiKV store.
@@ -70,6 +70,7 @@ func newTiKVSnapshot(store *TinykvStore, ver kv.Version) *tikvSnapshot {
 	}
 }
 
+// 设置快照的时间戳
 func (s *tikvSnapshot) setSnapshotTS(ts uint64) {
 	// Invalidate cache if the snapshotTS change!
 	s.version.Ver = ts
@@ -79,6 +80,7 @@ func (s *tikvSnapshot) setSnapshotTS(ts uint64) {
 }
 
 // Get gets the value for key k from snapshot.
+// 从快照中获取键 k 对应的值
 func (s *tikvSnapshot) Get(ctx context.Context, k kv.Key) ([]byte, error) {
 	ctx = context.WithValue(ctx, txnStartKey, s.version.Ver)
 	val, err := s.get(NewBackoffer(ctx, getMaxBackoff), k)
@@ -91,8 +93,11 @@ func (s *tikvSnapshot) Get(ctx context.Context, k kv.Key) ([]byte, error) {
 	return val, nil
 }
 
+// 向 TiKV 服务器发送 Get 请求来获取键 k 的值
 func (s *tikvSnapshot) get(bo *Backoffer, k kv.Key) ([]byte, error) {
+
 	// Check the cached values first.
+	// 检查缓存中是否有键 k 对应的值，如果有则直接返回
 	if s.cached != nil {
 		if value, ok := s.cached[string(k)]; ok {
 			return value, nil
@@ -105,6 +110,7 @@ func (s *tikvSnapshot) get(bo *Backoffer, k kv.Key) ([]byte, error) {
 		}
 	})
 
+	// 创建 clientHelper 实例，包含锁解析器、区域缓存、最小提交时间戳和客户端
 	cli := clientHelper{
 		LockResolver:      s.store.lockResolver,
 		RegionCache:       s.store.regionCache,
@@ -112,20 +118,27 @@ func (s *tikvSnapshot) get(bo *Backoffer, k kv.Key) ([]byte, error) {
 		Client:            s.store.client,
 	}
 
+	// 创建 Get 请求
 	req := tikvrpc.NewRequest(tikvrpc.CmdGet,
 		&pb.GetRequest{
 			Key:     k,
 			Version: s.version.Ver,
 		}, pb.Context{})
+
 	for {
+		// 获取键 k 对应的 region 信息
 		loc, err := s.store.regionCache.LocateKey(bo, k)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+
+		// 向 TiKV 服务器发送 Get 请求
 		resp, _, _, err := cli.SendReqCtx(bo, req, loc.Region, readTimeoutShort, "")
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+
+		// 是否有 region 错误
 		regionErr, err := resp.GetRegionError()
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -137,9 +150,13 @@ func (s *tikvSnapshot) get(bo *Backoffer, k kv.Key) ([]byte, error) {
 			}
 			continue
 		}
+
+		// 响应体是否为空
 		if resp.Resp == nil {
 			return nil, errors.Trace(ErrBodyMissing)
 		}
+
+		// 检查是否有键错误（仿照预写中的键错误处理）
 		cmdGetResp := resp.Resp.(*pb.GetResponse)
 		val := cmdGetResp.GetValue()
 		if keyErr := cmdGetResp.GetError(); keyErr != nil {
@@ -148,7 +165,23 @@ func (s *tikvSnapshot) get(bo *Backoffer, k kv.Key) ([]byte, error) {
 			//   1. The transaction is during commit, wait for a while and retry.
 			//   2. The transaction is dead with some locks left, resolve it.
 			// YOUR CODE HERE (lab3).
-			panic("YOUR CODE HERE")
+			// panic("YOUR CODE HERE")
+			lock, err := extractLockFromKeyErr(keyErr)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			msBeforeTxnExpired, err := cli.ResolveLocks(bo, s.version.Ver, []*Lock{lock})
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			// 如果ttl没有过期，则等待
+			if msBeforeTxnExpired > 0 {
+				err = bo.BackoffWithMaxSleep(boTxnLockFast, int(msBeforeTxnExpired), errors.New(keyErr.String()))
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+			}
 			continue
 		}
 		return val, nil
@@ -175,12 +208,12 @@ func extractLockFromKeyErr(keyErr *pb.KeyError) (*Lock, error) {
 }
 
 func extractKeyErr(keyErr *pb.KeyError) error {
-	failpoint.Inject("ErrMockRetryableOnly", func(val failpoint.Value) {
+	if val, ok := failpoint.Eval(_curpkg_("ErrMockRetryableOnly")); ok {
 		if val.(bool) {
 			keyErr.Conflict = nil
 			keyErr.Retryable = "mock retryable error"
 		}
-	})
+	}
 
 	if keyErr.Conflict != nil {
 		return newWriteConflictError(keyErr.Conflict)
