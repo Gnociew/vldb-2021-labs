@@ -15,6 +15,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// 定义了与数据库会话（Session）相关的功能和逻辑。
+// 会话是数据库与客户端之间的交互上下文，用于管理和维护客户端的连接状态、执行 SQL 语句、事务处理等。
+
+// 主要功能
+// 会话管理：创建、初始化和销毁会话；管理会话的生命周期。
+// SQL 执行：解析和执行 SQL 语句；管理 SQL 语句的执行上下文。
+// 事务处理：开始、提交和回滚事务；管理事务的隔离级别和一致性。
+// 会话变量：管理会话级别的变量和配置；支持设置和获取会话变量。
+// 错误处理：处理会话中的错误和异常；提供错误日志和调试信息。
+
 package session
 
 import (
@@ -54,6 +64,8 @@ import (
 )
 
 // Session context, it is consistent with the lifecycle of a client connection.
+// 接口，定义了与数据库会话相关的一组方法。
+// 会话是数据库与客户端之间的交互上下文，用于管理和维护客户端的连接状态、执行 SQL 语句、事务处理等。
 type Session interface {
 	sessionctx.Context
 	Status() uint16                                               // Flag of current status, such as autocommit.
@@ -79,17 +91,20 @@ var (
 	_ Session = (*session)(nil)
 )
 
+// 记录一个 SQL 语句及其上下文
 type stmtRecord struct {
 	st      sqlexec.Statement
 	stmtCtx *stmtctx.StatementContext
 }
 
 // StmtHistory holds all histories of statements in a txn.
+// 保存一个事务中的所有语句历史记录
 type StmtHistory struct {
-	history []*stmtRecord
+	history []*stmtRecord // 一个 stmtRecord 切片，用于存储语句记录
 }
 
 // Add appends a stmt to history list.
+// 将一个语句添加到历史记录列表中
 func (h *StmtHistory) Add(st sqlexec.Statement, stmtCtx *stmtctx.StatementContext) {
 	s := &stmtRecord{
 		st:      st,
@@ -99,23 +114,26 @@ func (h *StmtHistory) Add(st sqlexec.Statement, stmtCtx *stmtctx.StatementContex
 }
 
 // Count returns the count of the history.
+// 返回历史记录列表中的语句数量
 func (h *StmtHistory) Count() int {
 	return len(h.history)
 }
 
+// session 接口的具体实现，包含了会话的状态和相关方法。
 type session struct {
-	txn TxnState
+	txn TxnState // 事务状态
 
+	// 包含读写锁和值映射的结构体，用于并发控制和存储会话相关的值
 	mu struct {
 		sync.RWMutex
 		values map[fmt.Stringer]interface{}
 	}
 
-	store kv.Storage
+	store kv.Storage // 存储引擎
 
-	parser *parser.Parser
+	parser *parser.Parser // SQL 解析器
 
-	sessionVars *variable.SessionVars
+	sessionVars *variable.SessionVars // 会话变量
 
 	// ddlOwnerChecker is used in `select tidb_is_ddl_owner()` statement;
 	ddlOwnerChecker owner.DDLOwnerChecker
@@ -125,18 +143,22 @@ type session struct {
 }
 
 // DDLOwnerChecker returns s.ddlOwnerChecker.
+// 检查当前会话是否是 DDL 操作的所有者
 func (s *session) DDLOwnerChecker() owner.DDLOwnerChecker {
 	return s.ddlOwnerChecker
 }
 
+// 返回默认的事务内存缓冲区容量
 func (s *session) getMembufCap() int {
 	return kv.DefaultTxnMembufCap
 }
 
+// 返回当前会话的状态标志
 func (s *session) Status() uint16 {
 	return s.sessionVars.Status
 }
 
+// 返回最后插入的自增 ID
 func (s *session) LastInsertID() uint64 {
 	if s.sessionVars.StmtCtx.LastInsertID > 0 {
 		return s.sessionVars.StmtCtx.LastInsertID
@@ -144,18 +166,22 @@ func (s *session) LastInsertID() uint64 {
 	return s.sessionVars.StmtCtx.InsertID
 }
 
+// 返回最近执行的语句影响的行数
 func (s *session) AffectedRows() uint64 {
 	return s.sessionVars.StmtCtx.AffectedRows()
 }
 
+// 设置会话的客户端能力标志
 func (s *session) SetClientCapability(capability uint32) {
 	s.sessionVars.ClientCapability = capability
 }
 
+// 设置会话的连接 ID
 func (s *session) SetConnectionID(connectionID uint64) {
 	s.sessionVars.ConnectionID = connectionID
 }
 
+// 设置 TLS 连接状态
 func (s *session) SetTLSState(tlsState *tls.ConnectionState) {
 	// If user is not connected via TLS, then tlsState == nil.
 	if tlsState != nil {
@@ -163,10 +189,12 @@ func (s *session) SetTLSState(tlsState *tls.ConnectionState) {
 	}
 }
 
+// 设置会话的命令值
 func (s *session) SetCommandValue(command byte) {
 	atomic.StoreUint32(&s.sessionVars.CommandValue, uint32(command))
 }
 
+// 设置排序规则
 func (s *session) SetCollation(coID int) error {
 	cs, co, err := charset.GetCharsetInfoByID(coID)
 	if err != nil {
@@ -180,6 +208,7 @@ func (s *session) SetCollation(coID int) error {
 }
 
 // FieldList returns fields list of a table.
+// 返回指定表的字段列表
 func (s *session) FieldList(tableName string) ([]*ast.ResultField, error) {
 	is := infoschema.GetInfoSchema(s)
 	dbName := model.NewCIStr(s.GetSessionVars().CurrentDB)
@@ -204,6 +233,7 @@ func (s *session) FieldList(tableName string) ([]*ast.ResultField, error) {
 	return fields, nil
 }
 
+// 提交事务
 func (s *session) doCommit(ctx context.Context) error {
 	if !s.txn.Valid() {
 		return nil
@@ -236,6 +266,7 @@ func (s *session) doCommit(ctx context.Context) error {
 	return s.txn.Commit(sessionctx.SetCommitCtx(ctx, s))
 }
 
+// 提交事务
 func (s *session) commitTxn(ctx context.Context) error {
 	defer func() {
 		s.txn.changeToInvalid()
@@ -265,6 +296,7 @@ func (s *session) commitTxn(ctx context.Context) error {
 	return nil
 }
 
+// 提交事务
 func (s *session) CommitTxn(ctx context.Context) error {
 	err := s.commitTxn(ctx)
 
@@ -278,6 +310,7 @@ func (s *session) CommitTxn(ctx context.Context) error {
 	return err
 }
 
+// 回滚事务
 func (s *session) RollbackTxn(ctx context.Context) {
 	if s.txn.Valid() {
 		terror.Log(s.txn.Rollback())
@@ -287,10 +320,12 @@ func (s *session) RollbackTxn(ctx context.Context) {
 	s.sessionVars.SetStatusFlag(mysql.ServerStatusInTrans, false)
 }
 
+// 返回会话的协处理器客户端
 func (s *session) GetClient() kv.Client {
 	return s.client
 }
 
+// 返回会话的字符串表示
 func (s *session) String() string {
 	// TODO: how to print binded context in values appropriately?
 	sessVars := s.sessionVars
@@ -316,6 +351,7 @@ func (s *session) String() string {
 // SchemaChangedWithoutRetry is used for testing.
 var SchemaChangedWithoutRetry uint32
 
+// 检查事务是否已中止
 func (s *session) checkTxnAborted(stmt sqlexec.Statement) error {
 	if s.txn.doNotCommit == nil {
 		return nil
@@ -336,6 +372,7 @@ type sessionPool interface {
 	Put(pools.Resource)
 }
 
+// 返回系统会话池
 func (s *session) sysSessionPool() sessionPool {
 	return domain.GetDomain(s).SysSessionPool()
 }
@@ -344,6 +381,7 @@ func (s *session) sysSessionPool() sessionPool {
 // This is used for executing some restricted sql statements, usually executed during a normal statement execution.
 // Unlike normal Exec, it doesn't reset statement status, doesn't commit or rollback the current transaction
 // and doesn't write binlog.
+// 执行受限的 SQL 语句
 func (s *session) ExecRestrictedSQL(sql string) ([]chunk.Row, []*ast.ResultField, error) {
 	ctx := context.TODO()
 
@@ -358,6 +396,7 @@ func (s *session) ExecRestrictedSQL(sql string) ([]chunk.Row, []*ast.ResultField
 	return execRestrictedSQL(ctx, se, sql)
 }
 
+// 执行受限的 SQL 语句
 func execRestrictedSQL(ctx context.Context, se *session, sql string) ([]chunk.Row, []*ast.ResultField, error) {
 	recordSets, err := se.Execute(ctx, sql)
 	if err != nil {
@@ -386,6 +425,10 @@ func execRestrictedSQL(ctx context.Context, se *session, sql string) ([]chunk.Ro
 	return rows, fields, nil
 }
 
+// 创建会话工厂函数
+// 会话工厂函数是用于创建和初始化数据库会话（Session）的函数。
+// 会话工厂函数通常用于会话池（Session Pool），以便在需要时创建新的会话实例，并将其返回给调用者。
+// 会话工厂函数的主要作用是简化会话的创建过程，并确保会话在创建时被正确初始化。
 func createSessionFunc(store kv.Storage) pools.Factory {
 	return func() (pools.Resource, error) {
 		se, err := createSession(store)
@@ -406,6 +449,7 @@ func createSessionFunc(store kv.Storage) pools.Factory {
 	}
 }
 
+// 创建带有域的会话工厂函数
 func createSessionWithDomainFunc(store kv.Storage) func(*domain.Domain) (pools.Resource, error) {
 	return func(dom *domain.Domain) (pools.Resource, error) {
 		se, err := CreateSessionWithDomain(store, dom)
@@ -426,6 +470,7 @@ func createSessionWithDomainFunc(store kv.Storage) func(*domain.Domain) (pools.R
 	}
 }
 
+// 从结果集中提取所有行
 func drainRecordSet(ctx context.Context, se *session, rs sqlexec.RecordSet) ([]chunk.Row, error) {
 	var rows []chunk.Row
 	req := rs.NewChunk()
@@ -444,6 +489,7 @@ func drainRecordSet(ctx context.Context, se *session, rs sqlexec.RecordSet) ([]c
 
 // getExecRet executes restricted sql and the result is one column.
 // It returns a string value.
+// 执行受限的 SQL 语句，并返回结果的第一列的字符串值
 func (s *session) getExecRet(ctx sessionctx.Context, sql string) (string, error) {
 	rows, fields, err := s.ExecRestrictedSQL(sql)
 	if err != nil {
@@ -461,6 +507,7 @@ func (s *session) getExecRet(ctx sessionctx.Context, sql string) (string, error)
 }
 
 // GetAllSysVars implements GlobalVarAccessor.GetAllSysVars interface.
+// 获取所有系统变量
 func (s *session) GetAllSysVars() (map[string]string, error) {
 	if s.Value(sessionctx.Initing) != nil {
 		return nil, nil
@@ -480,6 +527,7 @@ func (s *session) GetAllSysVars() (map[string]string, error) {
 }
 
 // GetGlobalSysVar implements GlobalVarAccessor.GetGlobalSysVar interface.
+// 获取指定的全局系统变量
 func (s *session) GetGlobalSysVar(name string) (string, error) {
 	if s.Value(sessionctx.Initing) != nil {
 		// When running bootstrap or upgrade, we should not access global storage.
@@ -501,6 +549,7 @@ func (s *session) GetGlobalSysVar(name string) (string, error) {
 }
 
 // SetGlobalSysVar implements GlobalVarAccessor.SetGlobalSysVar interface.
+// 设置全局系统变量
 func (s *session) SetGlobalSysVar(name, value string) error {
 	if name == variable.SQLModeVar {
 		value = mysql.FormatSQLModeStr(value)
@@ -521,18 +570,25 @@ func (s *session) SetGlobalSysVar(name, value string) error {
 	return err
 }
 
+// 解析 SQL 语句
 func (s *session) ParseSQL(ctx context.Context, sql, charset, collation string) ([]ast.StmtNode, []error, error) {
 	s.parser.SetSQLMode(s.sessionVars.SQLMode)
 	return s.parser.Parse(sql, charset, collation)
 }
 
+// 执行 SQL 语句
 func (s *session) executeStatement(ctx context.Context, connID uint64, stmtNode ast.StmtNode, stmt sqlexec.Statement, recordSets []sqlexec.RecordSet, inMulitQuery bool) ([]sqlexec.RecordSet, error) {
+	// 设置查询字符串
 	s.SetValue(sessionctx.QueryString, stmt.OriginText())
+
+	// 检查语句是否为 DDL 语句，并设置相应的会话值
 	if _, ok := stmtNode.(ast.DDLNode); ok {
 		s.SetValue(sessionctx.LastExecuteDDL, true)
 	} else {
 		s.ClearValue(sessionctx.LastExecuteDDL)
 	}
+
+	// 调用 runStmt 方法执行语句，并获取结果集 recordSet
 	recordSet, err := runStmt(ctx, s, stmt)
 	if err != nil {
 		if !kv.ErrKeyExists.Equal(err) {
@@ -544,6 +600,7 @@ func (s *session) executeStatement(ctx context.Context, connID uint64, stmtNode 
 		return nil, err
 	}
 
+	// 如果是多语句查询，且 recordSet 为空，则创建一个空的 recordSet
 	if inMulitQuery && recordSet == nil {
 		recordSet = &multiQueryNoDelayRecordSet{
 			affectedRows: s.AffectedRows(),
@@ -559,6 +616,7 @@ func (s *session) executeStatement(ctx context.Context, connID uint64, stmtNode 
 	return recordSets, nil
 }
 
+// 执行 SQL 语句，并获取结果集 recordSets 和可能的错误。
 func (s *session) Execute(ctx context.Context, sql string) (recordSets []sqlexec.RecordSet, err error) {
 	if recordSets, err = s.execute(ctx, sql); err != nil {
 		s.sessionVars.StmtCtx.AppendError(err)
@@ -566,7 +624,13 @@ func (s *session) Execute(ctx context.Context, sql string) (recordSets []sqlexec
 	return
 }
 
+// 执行 SQL 语句，返回结果集 recordSets 和可能的错误。
 func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec.RecordSet, err error) {
+	// 准备事务上下文
+	// 准备事务上下文是指为当前会话准备一个事务的上下文环境，以便在执行 SQL 语句时能够正确地管理事务的状态和操作。
+	// 具体来说，这包括初始化事务相关的变量和状态，以确保事务能够正确地开始、提交或回滚。
+	///
+	// 用于在执行任何 SQL 语句之前准备事务上下文。这一步确保在整个 SQL 执行过程中，事务上下文是正确初始化的。
 	s.PrepareTxnCtx(ctx)
 	connID := s.sessionVars.ConnectionID
 	err = s.loadCommonGlobalVariablesIfNeeded()
@@ -574,10 +638,13 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 		return nil, err
 	}
 
+	// 获取字符集信息和排序规则
 	charsetInfo, collation := s.sessionVars.GetCharsetInfo()
 
 	// Step1: Compile query string to abstract syntax trees(ASTs).
-	parseStartTime := time.Now()
+	// 将查询字符串编译为抽象语法树（AST）
+
+	parseStartTime := time.Now() // 记录解析开始时间
 
 	var (
 		stmtNodes []ast.StmtNode
@@ -587,7 +654,7 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 	// Hint: step I.3.1
 	// YOUR CODE HERE (lab4)
 	// panic("YOUR CODE HERE")
-	// 调用 Parser，可以将文本解析成结构化数据，也就是抽象语法树 （AST）
+	// 调用 session.ParseSQL 将 SQL 字符串转化为一颗或一些语法树
 	stmtNodes, warns, err = s.ParseSQL(ctx, sql, charsetInfo, collation)
 	if err != nil {
 		s.rollbackOnError(ctx)
@@ -597,29 +664,36 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 		return nil, util.SyntaxError(err)
 	}
 	durParse := time.Since(parseStartTime)
-	s.GetSessionVars().DurationParse = durParse
+	s.GetSessionVars().DurationParse = durParse // 记录解析时间
 
-	compiler := executor.Compiler{Ctx: s}
-	multiQuery := len(stmtNodes) > 1
+	compiler := executor.Compiler{Ctx: s} // 创建编译器
+	multiQuery := len(stmtNodes) > 1      // 是否为多语句查询
 	logutil.Logger(ctx).Debug("session execute", zap.Uint64("connID", connID),
 		zap.String("charsetInfo", charsetInfo), zap.String("collation", collation),
 		zap.Uint64("compiler conn", compiler.Ctx.GetSessionVars().ConnectionID),
 		zap.Bool("multiQuery", multiQuery))
+
+	// 遍历每个语法树节点
 	for _, stmtNode := range stmtNodes {
 		s.sessionVars.StartTime = time.Now()
+		// 重新准备事务上下文
+		// 这一步确保在执行每个 SQL 语句之前，事务上下文都是最新的和正确的，特别是在多语句查询的情况下，每个语句都需要一个独立的事务上下文。
 		s.PrepareTxnCtx(ctx)
 
 		// Step2: Transform abstract syntax tree to a physical plan(stored in executor.ExecStmt).
 		// Some executions are done in compile stage, so we reset them before compile.
+		// 将抽象语法树转换为物理执行计划
+
+		// 一些执行操作在编译阶段完成，因此在编译之前需要重置它们
 		if err := executor.ResetContextOfStmt(s, stmtNode); err != nil {
 			return nil, err
 		}
+
 		var stmt *executor.ExecStmt
 		// Hint: step I.3.2
 		// YOUR CODE HERE (lab4)
 		// panic("YOUR CODE HERE")
-		// 拿到 AST 之后，就可以做各种验证、变化、优化，这一系列动作的入口在这里
-		// 将一颗语法树进行优化，依次生成逻辑执行计划和物理执行计划
+		// Compiler.Compile 将一颗语法树进行优化，依次生成逻辑执行计划和物理执行计划
 		stmt, err := compiler.Compile(ctx, stmtNode)
 		if stmt != nil {
 			logutil.Logger(ctx).Debug("stmt", zap.String("sql", stmt.Text))
@@ -632,28 +706,32 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 			return nil, err
 		}
 		durCompile := time.Since(s.sessionVars.StartTime)
-		s.GetSessionVars().DurationCompile = durCompile
+		s.GetSessionVars().DurationCompile = durCompile // 记录编译时间
 
 		// Step3: Execute the physical plan.
+		// 执行物理执行计划
 
 		// Hint: step I.3.3
 		// YOUR CODE HERE (lab4)
 		// panic("YOUR CODE HERE")
-		// 执行物理执行计划
+		// 通过 session.executeStatement 在 runStmt 函数中调用执行器的 Exec 函数
 		recordSets, err = s.executeStatement(ctx, connID, stmtNode, stmt, recordSets, multiQuery)
 		if err != nil {
 			return nil, err
 		}
 	}
 
+	// 处理多结果集
 	if s.sessionVars.ClientCapability&mysql.ClientMultiResults == 0 && len(recordSets) > 1 {
 		// return the first recordset if client doesn't support ClientMultiResults.
 		recordSets = recordSets[:1]
 	}
 
+	// 记录警告
 	for _, warn := range warns {
 		s.sessionVars.StmtCtx.AppendWarning(util.SyntaxWarn(warn))
 	}
+
 	return recordSets, nil
 }
 

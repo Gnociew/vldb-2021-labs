@@ -29,16 +29,23 @@ type Compiler struct {
 }
 
 // Compile compiles an ast.StmtNode to a physical plan.
+// 将一个抽象语法树节点（ast.StmtNode）编译成一个物理执行计划（ExecStmt）
 func (c *Compiler) Compile(ctx context.Context, stmtNode ast.StmtNode) (*ExecStmt, error) {
+	// 获取信息模式
 	infoSchema := infoschema.GetInfoSchema(c.Ctx)
+
+	// 预处理语法树节点
 	if err := plannercore.Preprocess(c.Ctx, stmtNode, infoSchema); err != nil {
 		return nil, err
 	}
 
+	// 优化语法树节点
 	finalPlan, names, err := planner.Optimize(ctx, c.Ctx, stmtNode, infoSchema)
 	if err != nil {
 		return nil, err
 	}
+
+	// 构建并返回 ExecStmt对象
 	return &ExecStmt{
 		InfoSchema:  infoSchema,
 		Plan:        finalPlan,

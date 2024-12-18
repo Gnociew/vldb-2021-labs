@@ -400,21 +400,23 @@ func (lr *LockResolver) getTxnStatus(bo *Backoffer, txnID uint64, primary []byte
 // If status is committed, the secondary should also be committed.
 // If status is not committed and the
 func (lr *LockResolver) resolveLock(bo *Backoffer, l *Lock, status TxnStatus, cleanRegions map[RegionVerID]struct{}) error {
+	// 判断事务是否为大事务，如果是，则需要清理整个区域
 	cleanWholeRegion := l.TxnSize >= bigTxnThreshold
+
 	for {
+		// 获取锁所在的区域位置
 		loc, err := lr.store.GetRegionCache().LocateKey(bo, l.Key)
 		if err != nil {
 			return errors.Trace(err)
 		}
-		if _, ok := cleanRegions[loc.Region]; ok {
+		if _, ok := cleanRegions[loc.Region]; ok { // 如果该区域已经被清理过，则直接返回
 			return nil
 		}
 
-		var req *tikvrpc.Request
-
-		// build the request
 		// YOUR CODE HERE (lab3).
 		// panic("YOUR CODE HERE")
+		// 构建 ResolveLock 请求
+		var req *tikvrpc.Request
 		req = tikvrpc.NewRequest(
 			tikvrpc.CmdResolveLock,
 			&kvrpcpb.ResolveLockRequest{
@@ -422,10 +424,13 @@ func (lr *LockResolver) resolveLock(bo *Backoffer, l *Lock, status TxnStatus, cl
 				CommitVersion: status.commitTS,
 			})
 
+		// 发送请求并获取响应
 		resp, err := lr.store.SendReq(bo, req, loc.Region, readTimeoutShort)
 		if err != nil {
 			return errors.Trace(err)
 		}
+
+		// 检查是否有 Region 错误
 		regionErr, err := resp.GetRegionError()
 		if err != nil {
 			return errors.Trace(err)
@@ -437,9 +442,13 @@ func (lr *LockResolver) resolveLock(bo *Backoffer, l *Lock, status TxnStatus, cl
 			}
 			continue
 		}
+
+		// 检查响应是否为空
 		if resp.Resp == nil {
 			return errors.Trace(ErrBodyMissing)
 		}
+
+		// 解析响应体，检查是否有键错误
 		cmdResp := resp.Resp.(*kvrpcpb.ResolveLockResponse)
 		if keyErr := cmdResp.GetError(); keyErr != nil {
 			err = errors.Errorf("unexpected resolve err: %s, lock: %v", keyErr, l)

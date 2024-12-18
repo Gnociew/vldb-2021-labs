@@ -15,6 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// 定义了与 TiDB 会话管理相关的功能和逻辑。
+// 主要用于管理和维护 TiDB 会话的状态、执行 SQL 语句、事务处理等。
+
 package session
 
 import (
@@ -40,16 +43,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// 管理多个 domain.Domain 实例。
 type domainMap struct {
 	domains map[string]*domain.Domain
 	mu      sync.Mutex
 }
 
+// 获取或创建一个 domain.Domain 实例
 func (dm *domainMap) Get(store kv.Storage) (d *domain.Domain, err error) {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 
 	// If this is the only domain instance, and the caller doesn't provide store.
+	// 如果只有一个 domain 实例且未提供 store，直接返回该实例
 	if len(dm.domains) == 1 && store == nil {
 		for _, r := range dm.domains {
 			return r, nil
@@ -89,12 +95,14 @@ func (dm *domainMap) Get(store kv.Storage) (d *domain.Domain, err error) {
 	return
 }
 
+// 删除指定 store 对应的 domain 实例
 func (dm *domainMap) Delete(store kv.Storage) {
 	dm.mu.Lock()
 	delete(dm.domains, store.UUID())
 	dm.mu.Unlock()
 }
 
+// 全局变量
 var (
 	domap = &domainMap{
 		domains: map[string]*domain.Domain{},
@@ -115,6 +123,7 @@ var (
 	statsLease = int64(3 * time.Second)
 )
 
+// 设置指定 store 的引导状态
 func setStoreBootstrapped(storeUUID string) {
 	storeBootstrappedLock.Lock()
 	defer storeBootstrappedLock.Unlock()
@@ -124,21 +133,25 @@ func setStoreBootstrapped(storeUUID string) {
 // SetSchemaLease changes the default schema lease time for DDL.
 // This function is very dangerous, don't use it if you really know what you do.
 // SetSchemaLease only affects not local storage after bootstrapped.
+// 设置模式租约时间
 func SetSchemaLease(lease time.Duration) {
 	atomic.StoreInt64(&schemaLease, int64(lease))
 }
 
 // SetStatsLease changes the default stats lease time for loading stats info.
+// 设置统计租约时间
 func SetStatsLease(lease time.Duration) {
 	atomic.StoreInt64(&statsLease, int64(lease))
 }
 
 // DisableStats4Test disables the stats for tests.
+// 在测试中禁用统计信息
 func DisableStats4Test() {
 	SetStatsLease(-1)
 }
 
 // Parse parses a query string to raw ast.StmtNode.
+// 解析 SQL 查询字符串为抽象语法树（AST）
 func Parse(ctx sessionctx.Context, src string) ([]ast.StmtNode, error) {
 	logutil.BgLogger().Debug("compiling", zap.String("source", src))
 	charset, collation := ctx.GetSessionVars().GetCharsetInfo()
@@ -158,12 +171,14 @@ func Parse(ctx sessionctx.Context, src string) ([]ast.StmtNode, error) {
 }
 
 // Compile is safe for concurrent use by multiple goroutines.
+// 将抽象语法树节点（AST）编译为物理执行计划
 func Compile(ctx context.Context, sctx sessionctx.Context, stmtNode ast.StmtNode) (sqlexec.Statement, error) {
 	compiler := executor.Compiler{Ctx: sctx}
 	stmt, err := compiler.Compile(ctx, stmtNode)
 	return stmt, err
 }
 
+// 完成 SQL 语句的执行
 func finishStmt(ctx context.Context, sctx sessionctx.Context, se *session, sessVars *variable.SessionVars,
 	meetsErr error, sql sqlexec.Statement) error {
 	if meetsErr != nil {
@@ -193,6 +208,7 @@ func finishStmt(ctx context.Context, sctx sessionctx.Context, se *session, sessV
 	return checkStmtLimit(ctx, sctx, se)
 }
 
+// 检查事务中的语句数量限制
 func checkStmtLimit(ctx context.Context, sctx sessionctx.Context, se *session) error {
 	// If the user insert, insert, insert ... but never commit, TiDB would OOM.
 	// So we limit the statement count in a transaction here.
@@ -207,22 +223,29 @@ func checkStmtLimit(ctx context.Context, sctx sessionctx.Context, se *session) e
 }
 
 // RunStmt exposes runStmt, only for test usage.
+// 暴露 runStmt 函数，仅供测试使用
 func RunStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) (rs sqlexec.RecordSet, err error) {
 	return runStmt(ctx, sctx, s)
 }
 
 // runStmt executes the sqlexec.Statement and commit or rollback the current transaction.
+// 执行 SQL 语句，并提交或回滚当前事务
 func runStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) (rs sqlexec.RecordSet, err error) {
+
+	// 获取会话和会话变量
 	se := sctx.(*session)
 	sessVars := se.GetSessionVars()
+
 	defer func() {
 		// If it is not a select statement, we record its slow log here,
 		// then it could include the transaction commit time.
+		// 如果结果集为空，记录慢日志
 		if rs == nil {
 			sessVars.PrevStmt = executor.FormatSQL(s.OriginText())
 		}
 	}()
 
+	// 检查事务是否已终止
 	err = se.checkTxnAborted(s)
 	if err != nil {
 		return nil, err
@@ -231,9 +254,10 @@ func runStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) 
 	// Hint: step I.3.3
 	// YOUR CODE HERE (lab4)
 	// panic("YOUR CODE HERE")
-	// 用执行器的 Exec 函数
+	// 调用执行器的 Exec 函数，执行 SQL 语句
 	rs, err = s.Exec(ctx)
 	sessVars.TxnCtx.StatementCount++
+	// 处理非只读语句的提交或回滚
 	if !s.IsReadOnly() {
 		// Handle the stmt commit/rollback.
 		if txn, err1 := sctx.Txn(false); err1 == nil {
@@ -244,7 +268,9 @@ func runStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) 
 					// Hint: step I.3.4
 					// YOUR CODE HERE (lab4)
 					// panic("YOUR CODE HERE")
-					// 这一条语句 Commit 到整个事务所属的 membuffer 当中去
+					// 在执行完 Exec 函数后，如果没有出现错误，
+					// 则调用 session.StmtCommit 方法将这一条语句 Commit 到整个事务所属的 membuffer 当中去
+					// vldb-2021-labs/tinysql/session/txn.go
 					err = sctx.StmtCommit()
 					if err != nil {
 						return nil, err
@@ -255,8 +281,10 @@ func runStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) 
 			logutil.BgLogger().Error("get txn failed", zap.Error(err1))
 		}
 	}
+	// 完成 SQL 语句的执行
 	err = finishStmt(ctx, sctx, se, sessVars, err, s)
 
+	// 处理挂起的事务状态
 	if se.txn.pending() {
 		// After run statement finish, txn state is still pending means the
 		// statement never need a Txn(), such as:
@@ -268,6 +296,7 @@ func runStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) 
 		// Reset txn state to invalid to dispose the pending start ts.
 		se.txn.changeToInvalid()
 	}
+
 	return rs, err
 }
 

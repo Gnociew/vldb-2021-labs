@@ -598,11 +598,11 @@ func (actionCommit) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch
 		c.setUndeterminedErr(errors.Trace(sender.rpcError))
 	}
 
-	if _, ok := failpoint.Eval(_curpkg_("mockFailAfterPK")); ok {
+	failpoint.Inject("mockFailAfterPK", func() {
 		if !isPrimary {
 			err = errors.New("commit secondary keys error")
 		}
-	}
+	})
 	if err != nil {
 		return errors.Trace(err)
 	}

@@ -32,6 +32,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// 文件定义了服务器和客户端之间的连接处理逻辑。
+// 包含了处理客户端请求、进行握手、读取和写入数据包等功能的实现。
+// 主要用于管理和维护服务器与客户端之间的连接状态和数据传输。
+
 package server
 
 import (
@@ -71,6 +75,7 @@ const (
 )
 
 // newClientConn creates a *clientConn object.
+// 创建一个新的 clientConn 对象。它接受一个 Server 实例作为参数
 func newClientConn(s *Server) *clientConn {
 	return &clientConn{
 		server:       s,
@@ -83,6 +88,8 @@ func newClientConn(s *Server) *clientConn {
 
 // clientConn represents a connection between server and client, it maintains connection specific state,
 // handles client query.
+// 表示服务器和客户端之间的连接
+// 维护连接的特定状态，并处理客户端查询
 type clientConn struct {
 	pkt          *packetIO         // a helper to read and write data in packet format.
 	bufReadConn  *bufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
@@ -104,6 +111,8 @@ type clientConn struct {
 	collation    uint8             // collation used by client, may be different from the collation used by database.
 }
 
+// 返回 clientConn 对象的字符串表示形式
+// 包括连接 ID、远程地址、状态、排序规则和用户信息
 func (cc *clientConn) String() string {
 	collationStr := mysql.Collations[cc.collation]
 	return fmt.Sprintf("id:%d, addr:%s status:%b, collation:%s, user:%s",
@@ -114,6 +123,9 @@ func (cc *clientConn) String() string {
 // handshake works like TCP handshake, but in a higher level, it first writes initial packet to client,
 // during handshake, client and server negotiate compatible features and do authentication.
 // After handshake, client can send sql query to server.
+// 类似于 TCP 握手，但在更高层次上进行。
+// 它首先向客户端写入初始数据包，在握手过程中，客户端和服务器协商兼容特性并进行身份验证。
+// 握手完成后，客户端可以向服务器发送 SQL 查询。
 func (cc *clientConn) handshake(ctx context.Context) error {
 	if err := cc.writeInitialHandshake(); err != nil {
 		return err
@@ -142,6 +154,7 @@ func (cc *clientConn) handshake(ctx context.Context) error {
 	return cc.flush()
 }
 
+// 关闭 clientConn 对象
 func (cc *clientConn) Close() error {
 	cc.server.rwlock.Lock()
 	delete(cc.server.clients, cc.connectionID)
@@ -150,6 +163,7 @@ func (cc *clientConn) Close() error {
 	return closeConn(cc, connections)
 }
 
+// 关闭 clientConn 对象的连接。它关闭缓冲读取连接，并记录任何错误
 func closeConn(cc *clientConn, connections int) error {
 	err := cc.bufReadConn.Close()
 	terror.Log(err)
@@ -159,6 +173,7 @@ func closeConn(cc *clientConn, connections int) error {
 	return nil
 }
 
+// 在不获取锁的情况下关闭 clientConn 对象（它从服务器的客户端列表中删除当前连接）
 func (cc *clientConn) closeWithoutLock() error {
 	delete(cc.server.clients, cc.connectionID)
 	return closeConn(cc, len(cc.server.clients))
@@ -166,6 +181,7 @@ func (cc *clientConn) closeWithoutLock() error {
 
 // writeInitialHandshake sends server version, connection ID, server capability, collation, server status
 // and auth salt to the client.
+// 向客户端发送初始握手数据包。数据包包括服务器版本、连接 ID、服务器能力、排序规则、服务器状态和身份验证盐
 func (cc *clientConn) writeInitialHandshake() error {
 	data := make([]byte, 4, 128)
 
@@ -209,10 +225,12 @@ func (cc *clientConn) writeInitialHandshake() error {
 	return cc.flush()
 }
 
+// 从客户端读取数据包
 func (cc *clientConn) readPacket() ([]byte, error) {
 	return cc.pkt.readPacket()
 }
 
+// 向客户端写入数据包
 func (cc *clientConn) writePacket(data []byte) error {
 	failpoint.Inject("FakeClientConn", func() {
 		if cc.pkt == nil {
@@ -223,6 +241,10 @@ func (cc *clientConn) writePacket(data []byte) error {
 }
 
 // getSessionVarsWaitTimeout get session variable wait_timeout
+// 获取会话变量 wait_timeout 的值
+// 会话变量 wait_timeout 用于指定服务器等待客户端活动的时间（以秒为单位）。
+// 如果在指定的时间内没有收到客户端的任何请求，
+// 服务器将关闭该连接。这个变量有助于管理服务器资源，防止长时间空闲的连接占用资源。
 func (cc *clientConn) getSessionVarsWaitTimeout(ctx context.Context) uint64 {
 	valStr, exists := cc.ctx.GetSessionVars().GetSystemVar(variable.WaitTimeout)
 	if !exists {
@@ -237,6 +259,8 @@ func (cc *clientConn) getSessionVarsWaitTimeout(ctx context.Context) uint64 {
 	return waitTimeout
 }
 
+// 表示客户端在握手过程中发送的响应数据。
+// 它包含客户端的能力标志、排序规则、用户名、数据库名称、身份验证数据和属性。
 type handshakeResponse41 struct {
 	Capability uint32
 	Collation  uint8
@@ -247,6 +271,7 @@ type handshakeResponse41 struct {
 }
 
 // parseOldHandshakeResponseHeader parses the old version handshake header HandshakeResponse320
+// 解析旧版本握手响应头
 func parseOldHandshakeResponseHeader(ctx context.Context, packet *handshakeResponse41, data []byte) (parsedBytes int, err error) {
 	// Ensure there are enough data to read:
 	// https://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::HandshakeResponse320
@@ -273,6 +298,7 @@ func parseOldHandshakeResponseHeader(ctx context.Context, packet *handshakeRespo
 }
 
 // parseOldHandshakeResponseBody parse the HandshakeResponse for Protocol::HandshakeResponse320 (except the common header part).
+// 解析旧版本握手响应体
 func parseOldHandshakeResponseBody(ctx context.Context, packet *handshakeResponse41, data []byte, offset int) (err error) {
 	defer func() {
 		// Check malformat packet cause out of range is disgusting, but don't panic!
@@ -302,6 +328,7 @@ func parseOldHandshakeResponseBody(ctx context.Context, packet *handshakeRespons
 }
 
 // parseHandshakeResponseHeader parses the common header of SSLRequest and HandshakeResponse41.
+// 解析 SSL 请求和握手响应的公共头部
 func parseHandshakeResponseHeader(ctx context.Context, packet *handshakeResponse41, data []byte) (parsedBytes int, err error) {
 	// Ensure there are enough data to read:
 	// http://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::SSLRequest
@@ -327,6 +354,7 @@ func parseHandshakeResponseHeader(ctx context.Context, packet *handshakeResponse
 }
 
 // parseHandshakeResponseBody parse the HandshakeResponse (except the common header part).
+// 解析握手响应的主体部分
 func parseHandshakeResponseBody(ctx context.Context, packet *handshakeResponse41, data []byte, offset int) (err error) {
 	defer func() {
 		// Check malformat packet cause out of range is disgusting, but don't panic!
@@ -394,6 +422,7 @@ func parseHandshakeResponseBody(ctx context.Context, packet *handshakeResponse41
 	return nil
 }
 
+// 解析握手响应中的属性
 func parseAttrs(data []byte) (map[string]string, error) {
 	attrs := make(map[string]string)
 	pos := 0
@@ -414,6 +443,7 @@ func parseAttrs(data []byte) (map[string]string, error) {
 	return attrs, nil
 }
 
+// 读取客户端发送的数据包，该数据包可能是 SSL 请求或握手响应
 func (cc *clientConn) readOptionalSSLRequestAndHandshakeResponse(ctx context.Context) error {
 	// Read a packet. It may be a SSLRequest or HandshakeResponse.
 	data, err := cc.readPacket()
@@ -497,6 +527,7 @@ func (cc *clientConn) SessionStatusToString() string {
 	)
 }
 
+// 打开会话并进行身份验证
 func (cc *clientConn) openSessionAndDoAuth() error {
 	var tlsStatePtr *tls.ConnectionState
 	if cc.tlsConn != nil {
@@ -517,6 +548,7 @@ func (cc *clientConn) openSessionAndDoAuth() error {
 	return nil
 }
 
+// 返回客户端的主机地址
 func (cc *clientConn) PeerHost(hasPassword string) (host string, err error) {
 	if len(cc.peerHost) > 0 {
 		return cc.peerHost, nil
@@ -539,12 +571,14 @@ func (cc *clientConn) PeerHost(hasPassword string) (host string, err error) {
 // This function returns and the connection is closed if there is an IO error or there is a panic.
 func (cc *clientConn) Run(ctx context.Context) {
 	const size = 4096
+	//在 run 方法返回时执行 defer 函数，用于处理 panic
 	defer func() {
-		r := recover()
+		r := recover() // 捕获可能的 panic，，防止程序崩溃
 		if r != nil {
 			buf := make([]byte, size)
 			stackSize := runtime.Stack(buf, false)
 			buf = buf[:stackSize]
+			// 记录堆栈信息，用于后续调试和分析问题
 			logutil.Logger(ctx).Error("connection running loop panic",
 				zap.Stringer("lastSQL", getLastStmtInConn{cc}),
 				zap.String("err", fmt.Sprintf("%v", r)),
@@ -552,27 +586,38 @@ func (cc *clientConn) Run(ctx context.Context) {
 			)
 
 		}
+		// 如果连接状态不是关闭状态，调用 Close 方法关闭连接
 		if atomic.LoadInt32(&cc.status) != connStatusShutdown {
 			err := cc.Close()
 			terror.Log(err)
 		}
 	}()
+
 	// Usually, client connection status changes between [dispatching] <=> [reading].
 	// When some event happens, server may notify this client connection by setting
 	// the status to special values, for example: kill or graceful shutdown.
 	// The client connection would detect the events when it fails to change status
 	// by CAS operation, it would then take some actions accordingly.
+	// 通常，客户端连接状态在 [dispatching] <=> [reading] 之间切换。
+	// 当某些事件发生时，服务器可能会通过设置特殊值来通知此客户端连接，例如：终止或优雅关闭。
+	// 客户端连接在 CAS 操作失败时会检测到这些事件，然后相应地采取一些行动。
+
+	// 循环处理客户端请求
 	for {
+		// 确保连接的状态从 connStatusDispatching 切换到 connStatusReading
 		if !atomic.CompareAndSwapInt32(&cc.status, connStatusDispatching, connStatusReading) {
 			return
 		}
 
+		// 从客户端读取数据包
+		///
 		cc.alloc.Reset()
-		// close connection when idle time is more than wait_timeout
+		// 设置超时时间，如果超时未收到数据，记录日志并关闭连接
 		waitTimeout := cc.getSessionVarsWaitTimeout(ctx)
 		cc.pkt.setReadTimeout(time.Duration(waitTimeout) * time.Second)
 		start := time.Now()
-		data, err := cc.readPacket()
+		data, err := cc.readPacket() // 开始读取
+		// 错误处理
 		if err != nil {
 			if terror.ErrorNotEqual(err, io.EOF) {
 				if netErr, isNetErr := errors.Cause(err).(net.Error); isNetErr && netErr.Timeout() {
@@ -593,6 +638,7 @@ func (cc *clientConn) Run(ctx context.Context) {
 			return
 		}
 
+		// 如果读取到数据包，将状态设置为 connStatusDispatching
 		if !atomic.CompareAndSwapInt32(&cc.status, connStatusReading, connStatusDispatching) {
 			return
 		}
@@ -600,8 +646,15 @@ func (cc *clientConn) Run(ctx context.Context) {
 		// Hint: step I.2
 		// YOUR CODE HERE (lab4)
 		// panic("YOUR CODE HERE")
-		// 调用 dispatch() 方法处理收到的请求
+		// 数据分发（ dispatch() ）
+		///
+		// dispatch 函数的主要作用
+		// 请求解析：分析从客户端接收到的数据包，提取命令或请求类型。
+		// 逻辑分发：根据解析结果，将请求分发到对应的处理方法（如查询处理、事务管理、数据修改等）。
+		// 错误管理：处理请求过程中可能发生的错误，并根据错误类型决定是否需要中断连接、返回错误响应或执行其他操作。
+		// 返回结果：将请求处理的结果返回给客户端。
 		err = cc.dispatch(ctx, data)
+		// 错误处理
 		if err != nil {
 			if terror.ErrorEqual(err, io.EOF) {
 
@@ -629,11 +682,13 @@ func (cc *clientConn) Run(ctx context.Context) {
 			terror.Log(err1)
 		}
 
+		// 每次循环结束，重置数据包序列号，以准备处理下一个请求
 		cc.pkt.sequence = 0
 	}
 }
 
 // ShutdownOrNotify will Shutdown this client connection, or do its best to notify.
+// 关闭客户端连接或尽量通知客户端连接关闭请求
 func (cc *clientConn) ShutdownOrNotify() bool {
 	if (cc.ctx.Status() & mysql.ServerStatusInTrans) > 0 {
 		return false
@@ -649,6 +704,7 @@ func (cc *clientConn) ShutdownOrNotify() bool {
 	return false
 }
 
+// 生成适合日志记录的查询字符串
 func queryStrForLog(query string) string {
 	const size = 4096
 	if len(query) > size {
@@ -657,6 +713,7 @@ func queryStrForLog(query string) string {
 	return query
 }
 
+// 生成适合日志记录的错误字符串
 func errStrForLog(err error) string {
 	if kv.ErrKeyExists.Equal(err) {
 		// Do not log stack for duplicated entry error.
@@ -668,32 +725,52 @@ func errStrForLog(err error) string {
 // dispatch handles client request based on command which is the first byte of the data.
 // It also gets a token from server which is used to limit the concurrently handling clients.
 // The most frequently used command is ComQuery.
+// dispatch 根据数据的第一个字节处理客户端请求。
+// 它还从服务器获取一个令牌，用于限制并发处理的客户端数量。
+// 最常用的命令是 ComQuery。
 func (cc *clientConn) dispatch(ctx context.Context, data []byte) error {
+	// 保存最后一个数据包，在发生错误时，可以检查 lastPacket 来还原客户端的最后请求
 	cc.lastPacket = data
-	cmd := data[0]
-	data = data[1:]
+
+	// 提取命令
+	cmd := data[0]  // 命令类型
+	data = data[1:] // 数据包内容
+
+	// 获取并重置会话变量
 	vars := cc.ctx.GetSessionVars()
-	atomic.StoreUint32(&vars.Killed, 0)
+	atomic.StoreUint32(&vars.Killed, 0) // 将变量 Killed 重置为 0，表示该会话没有被标记为需要终止
+	// 如果命令在有效范围内，记录当前命令类型
 	if cmd < mysql.ComEnd {
 		cc.ctx.SetCommandValue(cmd)
 	}
 
 	dataStr := string(hack.String(data))
 
+	// 处理不同命令
 	switch cmd {
+
+	// ComSleep 是 MySQL 内部使用的命令，通常不需要处理
 	case mysql.ComSleep:
 		// TODO: According to mysql document, this command is supposed to be used only internally.
 		// So it's just a temp fix, not sure if it's done right.
 		// Investigate this command and write test case later.
 		return nil
+
+	// 处理客户端断开连接的请求。
+	// 返回 io.EOF，通知调用方连接已结束
 	case mysql.ComQuit:
 		return io.EOF
+
+	// 处理客户端请求的查询结果
 	case mysql.ComQuery: // Most frequently used command.
 		// For issue 1989
 		// Input payload may end with byte '\0', we didn't find related mysql document about it, but mysql
 		// implementation accept that case. So trim the last '\0' here as if the payload an EOF string.
 		// See http://dev.mysql.com/doc/internals/en/com-query.html
-		if len(data) > 0 && data[len(data)-1] == 0 {
+		// 针对问题 1989，输入负载可能以字节 '\0' 结尾。
+		// 虽然未找到相关的 MySQL 文档，但 MySQL 的实现接受这种情况。
+		// 因此，这里移除最后的 '\0'，将负载视为以 EOF 结尾的字符串。
+		if len(data) > 0 && data[len(data)-1] == 0 { // 如果数据包以 '\0' 结尾，则去掉最后一个字节
 			data = data[:len(data)-1]
 			dataStr = string(hack.String(data))
 		}
@@ -701,23 +778,33 @@ func (cc *clientConn) dispatch(ctx context.Context, data []byte) error {
 		// Hint: step I.2
 		// YOUR CODE HERE (lab4)
 		// panic("YOUR CODE HERE")
-		// 对于 Command Query，从客户端发送来的主要是 SQL 文本，处理函数是 handleQuery() :
+		// 调用 cc.handleQuery 方法处理 SQL 查询，并返回结果：
 		err = cc.handleQuery(ctx, dataStr)
 		return err
+
+	// 检查服务器是否在线
 	case mysql.ComPing:
 		return cc.writeOK()
+
+	// 切换当前连接的数据库
 	case mysql.ComInitDB:
+		// 调用 cc.useDB 方法设置数据库
 		if err := cc.useDB(ctx, dataStr); err != nil {
 			return err
 		}
 		return cc.writeOK()
+
+	// 请求字段元数据
 	case mysql.ComFieldList:
 		return cc.handleFieldList(dataStr)
+
+	// 对于不支持的命令类型，返回错误
 	default:
 		return mysql.NewErrf(mysql.ErrUnknown, "command %d not supported now", cmd)
 	}
 }
 
+// 切换数据库
 func (cc *clientConn) useDB(ctx context.Context, db string) (err error) {
 	// if input is "use `SELECT`", mysql client just send "SELECT"
 	// so we add `` around db.
@@ -729,6 +816,7 @@ func (cc *clientConn) useDB(ctx context.Context, db string) (err error) {
 	return
 }
 
+// 刷新数据包
 func (cc *clientConn) flush() error {
 	failpoint.Inject("FakeClientConn", func() {
 		if cc.pkt == nil {
@@ -738,10 +826,12 @@ func (cc *clientConn) flush() error {
 	return cc.pkt.flush()
 }
 
+// 向客户端发送 OK 数据包
 func (cc *clientConn) writeOK() error {
 	return cc.writeOkWith("", cc.ctx.AffectedRows(), cc.ctx.LastInsertID(), cc.ctx.Status(), cc.ctx.WarningCount())
 }
 
+// 向客户端发送带有详细信息的 OK 数据包
 func (cc *clientConn) writeOkWith(msg string, affectedRows, lastInsertID uint64, status, warnCnt uint16) error {
 	enclen := 0
 	if len(msg) > 0 {
@@ -770,6 +860,7 @@ func (cc *clientConn) writeOkWith(msg string, affectedRows, lastInsertID uint64,
 	return cc.flush()
 }
 
+// 向客户端发送错误数据包
 func (cc *clientConn) writeError(e error) error {
 	var (
 		m  *mysql.SQLError
@@ -812,6 +903,7 @@ func (cc *clientConn) writeError(e error) error {
 // packets following it.
 // serverStatus, a flag bit represents server information
 // in the packet.
+// 向客户端发送 EOF 数据包
 func (cc *clientConn) writeEOF(serverStatus uint16) error {
 	data := cc.alloc.AllocWithLen(4, 9)
 
@@ -829,15 +921,25 @@ func (cc *clientConn) writeEOF(serverStatus uint16) error {
 
 // handleQuery executes the sql query string and writes result set or result ok to the client.
 func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
+
+	// 结果集是指从数据库查询中返回的一组数据。
+	// 结果集通常包含多行数据，每行数据包含多个列，可以用于遍历和处理查询返回的数据。
 	var rss []ResultSet
+
 	// Hint: step I.3
 	// YOUR CODE HERE (lab4)
 	// panic("YOUR CODE HERE")
+	// 调用执行器的 Execute 函数执行 SQL 查询，并将结果集存储到 rss 中
 	rss, err = cc.ctx.Execute(ctx, sql)
-
 	if err != nil {
 		return err
 	}
+
+	// 检查连接状态，如果连接状态为 connStatusShutdown 或 connStatusWaitShutdown，则关闭结果集
+	// 关闭结果集是指释放与结果集相关的资源，以便系统可以回收这些资源。具体来说，关闭结果集通常包括以下操作：
+	// 释放内存：释放存储结果集数据的内存。
+	// 关闭游标：如果查询使用了数据库游标，关闭游标以释放数据库连接资源。
+	// 清理临时数据：删除与结果集相关的临时数据或文件。
 	status := atomic.LoadInt32(&cc.status)
 	if rss != nil && (status == connStatusShutdown || status == connStatusWaitShutdown) {
 		for _, rs := range rss {
@@ -845,6 +947,8 @@ func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
 		}
 		return executor.ErrQueryInterrupted
 	}
+	// 如果结果集不为空，根据结果集的数量调用 writeResultset 或 writeMultiResultset 方法向客户端发送结果集
+	// 为了流式的将执行的结果返回给客户端，而不是将所有结果存放在 DBMS 的内存中
 	if rss != nil {
 		if len(rss) == 1 {
 			err = cc.writeResultset(ctx, rss[0], false, 0, 0)
@@ -859,6 +963,8 @@ func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
 
 // handleFieldList returns the field list for a table.
 // The sql string is composed of a table name and a terminating character \x00.
+// 返回表的字段列表。
+// 具体来说，它处理客户端发送的 COM_FIELD_LIST 命令，返回指定表的字段信息
 func (cc *clientConn) handleFieldList(sql string) (err error) {
 	parts := strings.Split(sql, "\x00")
 	columns, err := cc.ctx.FieldList(parts[0])
@@ -890,9 +996,11 @@ func (cc *clientConn) handleFieldList(sql string) (err error) {
 // serverStatus, a flag bit represents server information.
 // fetchSize, the desired number of rows to be fetched each time when client uses cursor.
 // resultsets, it's used to support the MULTI_RESULTS capability in mysql protocol.
+// 将数据写入结果集，并使用 rs.Next 获取行数据
 func (cc *clientConn) writeResultset(ctx context.Context, rs ResultSet, binary bool, serverStatus uint16, fetchSize int) (runErr error) {
 	defer func() {
 		// close ResultSet when cursor doesn't exist
+		// 当游标不存在时关闭 ResultSet
 		if !mysql.HasCursorExistsFlag(serverStatus) {
 			terror.Call(rs.Close)
 		}
@@ -910,7 +1018,13 @@ func (cc *clientConn) writeResultset(ctx context.Context, rs ResultSet, binary b
 		buf = buf[:stackSize]
 		logutil.Logger(ctx).Error("write query result panic", zap.Stringer("lastSQL", getLastStmtInConn{cc}), zap.String("stack", string(buf)))
 	}()
+
 	var err error
+	// 如果 serverStatus 中有游标存在标志，调用 writeChunksWithFetchSize 方法写入数据
+	// 否则，调用 writeChunks 方法写入数据
+	///
+	// 游标的存在与否代表了不同的查询处理方式和数据传输方式。
+	/// 游标存在时，适用于逐行处理结果集、分页查询和长时间查询；游标不存在时，适用于一次性返回结果集和简化数据传输。
 	if mysql.HasCursorExistsFlag(serverStatus) {
 		err = cc.writeChunksWithFetchSize(ctx, rs, serverStatus, fetchSize)
 	} else {
@@ -923,6 +1037,8 @@ func (cc *clientConn) writeResultset(ctx context.Context, rs ResultSet, binary b
 	return cc.flush()
 }
 
+// 将列信息写入到客户端
+// 将列信息编码成数据包并发送给客户端，最后发送一个 EOF 数据包表示列信息的结束。
 func (cc *clientConn) writeColumnInfo(columns []*ColumnInfo, serverStatus uint16) error {
 	data := cc.alloc.AllocWithLen(4, 1024)
 	data = dumpLengthEncodedInt(data, uint64(len(columns)))
@@ -943,20 +1059,30 @@ func (cc *clientConn) writeColumnInfo(columns []*ColumnInfo, serverStatus uint16
 // binary specifies the way to dump data. It throws any error while dumping data.
 // serverStatus, a flag bit represents server information
 func (cc *clientConn) writeChunks(ctx context.Context, rs ResultSet, binary bool, serverStatus uint16) error {
+	// 分配数据包的内存
 	data := cc.alloc.AllocWithLen(4, 1024)
+
+	// 创建一个 Chunk 用于存储从 ResultSet 获取的数据
 	req := rs.NewChunk()
+
+	// 初始化标志变量
 	gotColumnInfo := false
+
+	// 循环从 ResultSet 获取数据并写入到连接中
 	for {
 		var err error
 		// Here server.tidbResultSet implements Next method.
 		// Hint: step I.4.4
 		// YOUR CODE HERE (lab4)
 		// panic("YOUR CODE HERE")
-		// 调用执行器的 Next 函数，返回一条数据
+		// 调用 ResultSet.Next 函数来执行
+		// 每次调用会返回一条数据，直到返回的数据为空，说明执行完成
 		err = rs.Next(ctx, req)
 		if err != nil {
 			return err
 		}
+
+		// 如果没有获取到列信息，调用 writeColumnInfo 方法写入列信息
 		if !gotColumnInfo {
 			// We need to call Next before we get columns.
 			// Otherwise, we will get incorrect columns info.
@@ -967,10 +1093,14 @@ func (cc *clientConn) writeChunks(ctx context.Context, rs ResultSet, binary bool
 			}
 			gotColumnInfo = true
 		}
+
+		// 获取当前 Chunk 中的行数
 		rowCount := req.NumRows()
+		// 如果行数为 0，说明数据已经读取完毕，退出循环
 		if rowCount == 0 {
 			break
 		}
+		// 遍历 Chunk 中的每一行数据
 		for i := 0; i < rowCount; i++ {
 			data = data[0:4]
 			if binary {
@@ -986,6 +1116,7 @@ func (cc *clientConn) writeChunks(ctx context.Context, rs ResultSet, binary bool
 			}
 		}
 	}
+
 	return cc.writeEOF(serverStatus)
 }
 
