@@ -653,7 +653,6 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 
 	// Hint: step I.3.1
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
 	// 调用 session.ParseSQL 将 SQL 字符串转化为一颗或一些语法树
 	stmtNodes, warns, err = s.ParseSQL(ctx, sql, charsetInfo, collation)
 	if err != nil {
@@ -692,7 +691,6 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 		var stmt *executor.ExecStmt
 		// Hint: step I.3.2
 		// YOUR CODE HERE (lab4)
-		// panic("YOUR CODE HERE")
 		// Compiler.Compile 将一颗语法树进行优化，依次生成逻辑执行计划和物理执行计划
 		stmt, err := compiler.Compile(ctx, stmtNode)
 		if stmt != nil {
@@ -713,7 +711,6 @@ func (s *session) execute(ctx context.Context, sql string) (recordSets []sqlexec
 
 		// Hint: step I.3.3
 		// YOUR CODE HERE (lab4)
-		// panic("YOUR CODE HERE")
 		// 通过 session.executeStatement 在 runStmt 函数中调用执行器的 Exec 函数
 		recordSets, err = s.executeStatement(ctx, connID, stmtNode, stmt, recordSets, multiQuery)
 		if err != nil {

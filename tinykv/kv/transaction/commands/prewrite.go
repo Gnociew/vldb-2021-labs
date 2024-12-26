@@ -115,8 +115,6 @@ func (p *Prewrite) prewriteMutation(txn *mvcc.MvccTxn, mut *kvrpcpb.Mutation) (*
 	//      尝试在 `kvrpcpb.KeyError` 响应中正确设置错误信息。
 	// tinykv/kv/transaction/mvcc/transaction.go
 
-	// panic("prewriteMutation is not implemented yet")
-
 	// 如果一个事务发现目标键的最新提交版本的时间戳大于等于自己的 StartTS，则认为存在冲突
 	write, commitTs, err := txn.MostRecentWrite(key)
 	if err != nil {
@@ -170,8 +168,6 @@ func (p *Prewrite) prewriteMutation(txn *mvcc.MvccTxn, mut *kvrpcpb.Mutation) (*
 	// 写入锁和值。
 	// 提示：检查 `mvccTxn.Txn` 提供的接口。
 	// tinykv/kv/transaction/mvcc/transaction.go
-
-	// panic("lock record generation is not implemented yet")
 
 	// 写入锁
 	lock = &mvcc.Lock{

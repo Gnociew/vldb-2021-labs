@@ -185,19 +185,25 @@ func (e *InsertValues) processSetList() error {
 }
 
 // insertRows processes `insert|replace into values ()` or `insert|replace into set x=y`
+// 处理 INSERT 或 REPLACE INTO 语句中的 VALUES 或 SET 子句
 func insertRows(ctx context.Context, base insertCommon) (err error) {
+	// 初始化 insertCommon
 	e := base.insertCommon()
 	// For `insert|replace into set x=y`, process the set list here.
+	// 处理 SET 列表
 	if err = e.processSetList(); err != nil {
 		return err
 	}
 
+	// 设置延迟填充自增 ID
 	e.lazyFillAutoID = true
+	// 选择行评估函数
 	evalRowFunc := e.fastEvalRow
 	if !e.allAssignmentsAreConstant {
 		evalRowFunc = e.evalRow
 	}
 
+	// 评估每一行数据
 	rows := make([][]types.Datum, 0, len(e.Lists))
 	for i, list := range e.Lists {
 		e.rowCount++
@@ -209,10 +215,12 @@ func insertRows(ctx context.Context, base insertCommon) (err error) {
 		rows = append(rows, row)
 	}
 	// Fill the batch allocated autoIDs.
+	// 充批量分配的自增 ID
 	rows, err = e.lazyAdjustAutoIncrementDatum(ctx, rows)
 	if err != nil {
 		return err
 	}
+	// 执行插入操作
 	return base.exec(ctx, rows)
 }
 
@@ -657,25 +665,33 @@ func getAutoRecordID(d types.Datum, target *types.FieldType, isInsert bool) (int
 	return recordID, nil
 }
 
+// 将一行数据插入到表中
 func (e *InsertValues) addRecord(ctx context.Context, row []types.Datum) (int64, error) {
+	//  获取事务对象
 	txn, err := e.ctx.Txn(true)
 	if err != nil {
 		return 0, err
 	}
+
+	// 检查会话变量 ConstraintCheckInPlace：
+	// 如果为 false，表明约束检查（如主键或唯一约束）在写入时不强制执行。
+	// 设置事务选项 kv.PresumeKeyNotExists，表示默认假设键不存在，从而优化写入性能。
+	// 这个优化通常在分布式环境中用于减少冲突检测的开销
 	if !e.ctx.GetSessionVars().ConstraintCheckInPlace {
 		txn.SetOption(kv.PresumeKeyNotExists, nil)
 	}
 	var recordID int64
 	// Hint: step II.5
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
 	// 输入的一行数据通过 TableCommon.AddRecord 函数写入到 membuffer 当中
 	recordID, err = e.Table.AddRecord(e.ctx, row, table.WithCtx(ctx))
+	// 清除事务选项，恢复默认行为
 	txn.DelOption(kv.PresumeKeyNotExists)
 	if err != nil {
 		return 0, err
 	}
 	if e.lastInsertID != 0 {
+		// 维护 lastInsertID，便于用户通过 SQL 获取最近插入的 ID
 		e.ctx.GetSessionVars().SetLastInsertID(e.lastInsertID)
 	}
 	return recordID, nil

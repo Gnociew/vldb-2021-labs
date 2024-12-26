@@ -43,8 +43,6 @@ func (s *StandAloneStorage) Stop() error {
 // ctx 表示一个上下文对象，用于存储一些请求的元数据
 func (s *StandAloneStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, error) {
 	// // YOUR CODE HERE (lab1).
-	// panic("not implemented yet")
-	// return nil, nil
 
 	// 创建一个新的 Badger 事务
 	txn := s.db.NewTransaction(false) // false: 只读事务
@@ -58,7 +56,6 @@ func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) 
 	// YOUR CODE HERE (lab1).
 	// Try to check the definition of `storage.Modify` and txn interface of `badger`.
 	// As the column family is not supported by `badger`, a wrapper is used to simulate it.
-	// panic("not implemented yet")
 	// return nil
 
 	// 创建一个新的 Badger 写事务

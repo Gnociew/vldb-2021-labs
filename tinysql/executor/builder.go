@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// 文件的主要作用是定义 executorBuilder 结构体及其相关方法，用于从执行计划（Plan）构建执行器（Executor）。
+// 执行器是 TiDB 中用于执行 SQL 语句的核心组件。
+
 package executor
 
 import (
@@ -42,10 +45,11 @@ import (
 
 // executorBuilder builds an Executor from a Plan.
 // The InfoSchema must not change during execution.
+// 从执行计划构建执行器
 type executorBuilder struct {
-	ctx     sessionctx.Context
-	is      infoschema.InfoSchema
-	startTS uint64 // cached when the first time getStartTS() is called
+	ctx     sessionctx.Context    // 会话上下文
+	is      infoschema.InfoSchema // 信息模式
+	startTS uint64                // cached when the first time getStartTS() is called
 	// err is set when there is error happened during Executor building process.
 	err error
 }
@@ -59,12 +63,15 @@ func newExecutorBuilder(ctx sessionctx.Context, is infoschema.InfoSchema) *execu
 
 // MockPhysicalPlan is used to return a specified executor in when build.
 // It is mainly used for testing.
+// MockPhysicalPlan 接口用于在构建时返回指定的执行器，主要用于测试。
 type MockPhysicalPlan interface {
 	plannercore.PhysicalPlan
 	GetExecutor() Executor
 }
 
+// 根据传入的计划类型调用相应的构建方法，返回对应的执行器
 func (b *executorBuilder) build(p plannercore.Plan) Executor {
+	// // 根据不同的计划类型，调用相应的构建方法
 	switch v := p.(type) {
 	case nil:
 		return nil
@@ -126,6 +133,8 @@ func (b *executorBuilder) build(p plannercore.Plan) Executor {
 	}
 }
 
+// 构建一个 ShowDDLExec 执行器，用于显示 DDL 信息。
+// 它从上下文中获取 DDL 所有者 ID 和 DDL 信息，并将这些信息存储在执行器中。
 func (b *executorBuilder) buildShowDDL(v *plannercore.ShowDDL) Executor {
 	// We get DDLInfo here because for Executors that returns result set,
 	// next will be called after transaction has been committed.
@@ -159,6 +168,7 @@ func (b *executorBuilder) buildShowDDL(v *plannercore.ShowDDL) Executor {
 	return e
 }
 
+// 构建一个 ShowDDLJobsExec 执行器，用于显示 DDL 作业信息。
 func (b *executorBuilder) buildShowDDLJobs(v *plannercore.PhysicalShowDDLJobs) Executor {
 	e := &ShowDDLJobsExec{
 		jobNumber:    v.JobNumber,
@@ -168,6 +178,8 @@ func (b *executorBuilder) buildShowDDLJobs(v *plannercore.PhysicalShowDDLJobs) E
 	return e
 }
 
+// 构建一个 LimitExec 执行器，用于限制查询结果的数量。
+// 它首先构建子执行器，然后根据 PhysicalLimit 计划中的 Count 和 Offset 初始化 LimitExec。
 func (b *executorBuilder) buildLimit(v *plannercore.PhysicalLimit) Executor {
 	childExec := b.build(v.Children()[0])
 	if b.err != nil {
@@ -184,6 +196,8 @@ func (b *executorBuilder) buildLimit(v *plannercore.PhysicalLimit) Executor {
 	return e
 }
 
+// 构建一个 ShowExec 执行器，用于处理 SHOW 语句。
+// 它根据 PhysicalShow 计划中的信息初始化 ShowExec
 func (b *executorBuilder) buildShow(v *plannercore.PhysicalShow) Executor {
 	e := &ShowExec{
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID()),
@@ -201,6 +215,8 @@ func (b *executorBuilder) buildShow(v *plannercore.PhysicalShow) Executor {
 	return e
 }
 
+// 构建一个 SimpleExec 执行器，用于处理简单的 SQL 语句。
+// 它根据 PhysicalSimple 计划中的信息初始化 SimpleExec
 func (b *executorBuilder) buildSimple(v *plannercore.Simple) Executor {
 	base := newBaseExecutor(b.ctx, v.Schema(), v.ExplainID())
 	base.initCap = chunk.ZeroCapacity
@@ -212,6 +228,8 @@ func (b *executorBuilder) buildSimple(v *plannercore.Simple) Executor {
 	return e
 }
 
+// 构建一个 SetExecutor 执行器，用于处理 SET 语句。
+// 它根据 PhysicalSet 计划中的信息初始化 SetExecutor
 func (b *executorBuilder) buildSet(v *plannercore.Set) Executor {
 	base := newBaseExecutor(b.ctx, v.Schema(), v.ExplainID())
 	base.initCap = chunk.ZeroCapacity
@@ -222,20 +240,27 @@ func (b *executorBuilder) buildSet(v *plannercore.Set) Executor {
 	return e
 }
 
+// 构建一个 InsertExec 执行器，用于处理 INSERT 语句。
 func (b *executorBuilder) buildInsert(v *plannercore.Insert) Executor {
+	// 获取事务开始时间戳
 	b.startTS = b.ctx.GetSessionVars().TxnCtx.GetForUpdateTS()
+
+	// 构建选择计划的执行器
 	selectExec := b.build(v.SelectPlan)
 	if b.err != nil {
 		return nil
 	}
+
+	// 初始化基础执行器
 	var baseExec baseExecutor
 	if selectExec != nil {
 		baseExec = newBaseExecutor(b.ctx, nil, v.ExplainID(), selectExec)
 	} else {
 		baseExec = newBaseExecutor(b.ctx, nil, v.ExplainID())
 	}
-	baseExec.initCap = chunk.ZeroCapacity
+	baseExec.initCap = chunk.ZeroCapacity // 执行器的初始容量
 
+	// 初始化 InsertValues 结构体
 	ivs := &InsertValues{
 		baseExecutor:              baseExec,
 		Table:                     v.Table,
@@ -249,14 +274,14 @@ func (b *executorBuilder) buildInsert(v *plannercore.Insert) Executor {
 	var err error
 	// Hint: step II.1
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
-	// 生成执行所需要涉及到的 Columns 信息
+	// 通过 InsertValues.initInsertColumns 生成执行所需要涉及到的 Columns 信息
 	err = ivs.initInsertColumns()
 	if err != nil {
 		b.err = err
 		return nil
 	}
 
+	// 如果 Insert 计划是 REPLACE 语句
 	if v.IsReplace {
 		return b.buildReplace(ivs)
 	}
@@ -562,8 +587,8 @@ func (b *executorBuilder) buildProjection(v *plannercore.PhysicalProjection) Exe
 	var childExec Executor
 	// Hint: step III.1
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
-	// 对下层的结果进行处理，所以有 children，这里会递归的调用 executorBuilder.build 函数来 build 子 Executor
+	// ProjectionExec 一定会对下层的结果进行处理，所以有 children
+	// 这里会递归的调用 executorBuilder.build 函数来 build 子 Executor
 	childExec = b.build(v.Children()[0])
 	if b.err != nil {
 		return nil

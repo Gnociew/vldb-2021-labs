@@ -38,8 +38,6 @@ func (c *Commit) PrepareWrites(txn *mvcc.MvccTxn) (interface{}, error) {
 	// report unexpected error.
 	// 检查 commitTs 是否有效，commitTs 必须大于事务的 startTs。如果不是，则报告意外错误。
 
-	// panic("PrepareWrites is not implemented for commit command")
-
 	response := new(kvrpcpb.CommitResponse)
 	if commitTs <= txn.StartTS {
 		response.Error = &kvrpcpb.KeyError{

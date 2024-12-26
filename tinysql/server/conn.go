@@ -777,7 +777,6 @@ func (cc *clientConn) dispatch(ctx context.Context, data []byte) error {
 		var err error
 		// Hint: step I.2
 		// YOUR CODE HERE (lab4)
-		// panic("YOUR CODE HERE")
 		// 调用 cc.handleQuery 方法处理 SQL 查询，并返回结果：
 		err = cc.handleQuery(ctx, dataStr)
 		return err
@@ -928,7 +927,6 @@ func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
 
 	// Hint: step I.3
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
 	// 调用执行器的 Execute 函数执行 SQL 查询，并将结果集存储到 rss 中
 	rss, err = cc.ctx.Execute(ctx, sql)
 	if err != nil {
@@ -1074,7 +1072,6 @@ func (cc *clientConn) writeChunks(ctx context.Context, rs ResultSet, binary bool
 		// Here server.tidbResultSet implements Next method.
 		// Hint: step I.4.4
 		// YOUR CODE HERE (lab4)
-		// panic("YOUR CODE HERE")
 		// 调用 ResultSet.Next 函数来执行
 		// 每次调用会返回一条数据，直到返回的数据为空，说明执行完成
 		err = rs.Next(ctx, req)

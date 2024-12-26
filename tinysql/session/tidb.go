@@ -193,7 +193,6 @@ func finishStmt(ctx context.Context, sctx sessionctx.Context, se *session, sessV
 		var err error
 		// Hint: step I.5.2.1
 		// YOUR CODE HERE (lab4)
-		// panic("YOUR CODE HERE")
 		// 调用 session.CommitTxn 提交事务
 		err = se.commitTxn(ctx)
 		if err != nil {
@@ -253,7 +252,6 @@ func runStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) 
 
 	// Hint: step I.3.3
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
 	// 调用执行器的 Exec 函数，执行 SQL 语句
 	rs, err = s.Exec(ctx)
 	sessVars.TxnCtx.StatementCount++
@@ -267,7 +265,6 @@ func runStmt(ctx context.Context, sctx sessionctx.Context, s sqlexec.Statement) 
 				} else {
 					// Hint: step I.3.4
 					// YOUR CODE HERE (lab4)
-					// panic("YOUR CODE HERE")
 					// 在执行完 Exec 函数后，如果没有出现错误，
 					// 则调用 session.StmtCommit 方法将这一条语句 Commit 到整个事务所属的 membuffer 当中去
 					// vldb-2021-labs/tinysql/session/txn.go

@@ -381,6 +381,7 @@ func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.Write
 
 	}
 
+	// 更新 Raft 状态
 	ps.raftState.LastIndex = lastIndex
 	ps.raftState.LastTerm = lastTerm
 	return nil
@@ -565,7 +566,7 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 	// 提示：Raft ready 的输出包括：快照、日志条目、状态，尝试正确处理它们。
 	//       注意，应用快照可能需要使用 KV 引擎，而其他操作将始终使用 Raft 引擎。
 
-	// // 如果 Ready 包含新的日志条目，将其持久化
+	// 如果 Ready 包含新的日志条目，将其持久化
 	if len(ready.Entries) != 0 {
 		// Hint1: Process entries if it's not empty.
 		// 如果日志条目不为空，处理日志条目。
@@ -577,7 +578,7 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 
 	// Last index is 0 means the peer is created from raft message
 	// and has not applied snapshot yet, so skip persistent hard state.
-	// // 最后一个索引为 0 表示该 peer 是从 Raft 消息中创建的，并且尚未应用快照，因此跳过持久化硬状态。
+	// 最后一个索引为 0 表示该 peer 是从 Raft 消息中创建的，并且尚未应用快照，因此跳过持久化硬状态。
 	if ps.raftState.LastIndex > 0 {
 		// Hint2: Handle the hard state if it is NOT empty.
 		// 提示2：如果硬状态不为空，处理硬状态。

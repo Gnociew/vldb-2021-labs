@@ -340,7 +340,6 @@ func (lr *LockResolver) getTxnStatus(bo *Backoffer, txnID uint64, primary []byte
 	var req *tikvrpc.Request
 	// build the request
 	// YOUR CODE HERE (lab3).
-	// panic("YOUR CODE HERE")
 	// 构建 CheckTxnStatus 请求
 	req = tikvrpc.NewRequest(
 		tikvrpc.CmdCheckTxnStatus,
@@ -385,7 +384,6 @@ func (lr *LockResolver) getTxnStatus(bo *Backoffer, txnID uint64, primary []byte
 
 		// Assign status with response
 		// YOUR CODE HERE (lab3).
-		// panic("YOUR CODE HERE")
 		// 解析响应体，将事务状态赋值给 status 变量
 		status.ttl = cmdResp.LockTtl
 		status.commitTS = cmdResp.CommitVersion
@@ -414,7 +412,6 @@ func (lr *LockResolver) resolveLock(bo *Backoffer, l *Lock, status TxnStatus, cl
 		}
 
 		// YOUR CODE HERE (lab3).
-		// panic("YOUR CODE HERE")
 		// 构建 ResolveLock 请求
 		var req *tikvrpc.Request
 		req = tikvrpc.NewRequest(

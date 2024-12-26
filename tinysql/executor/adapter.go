@@ -204,7 +204,6 @@ func (a *ExecStmt) Exec(ctx context.Context) (_ sqlexec.RecordSet, err error) {
 	var e Executor
 	// Hint: step I.4.1
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
 	// 调用 ExecStmt.buildExecutor，通过物理执行计划，构建执行器
 	e, err = a.buildExecutor()
 	if err != nil {
@@ -215,7 +214,6 @@ func (a *ExecStmt) Exec(ctx context.Context) (_ sqlexec.RecordSet, err error) {
 	///
 	// Hint: step I.4.2
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
 	// 调用顶层的 Executor.Open 方法后，会传递到其中的子 Executor 当中，
 	// 这一操作会递归地将所有的 Executor 都初始化。
 	err = e.Open(ctx)
@@ -266,7 +264,6 @@ func (a *ExecStmt) handleNoDelay(ctx context.Context, e Executor) (bool, sqlexec
 	if toCheck.Schema().Len() == 0 {
 		// Hint: step I.4.3
 		// YOUR CODE HERE (lab4)
-		// panic("YOUR CODE HERE")
 		// 如果这个 Executor 不会返回结果
 		// 在 handleNoDelayExecutor 内部立即执行
 		r, err := a.handleNoDelayExecutor(ctx, e)
@@ -286,7 +283,6 @@ func (a *ExecStmt) handleNoDelayExecutor(ctx context.Context, e Executor) (sqlex
 
 	// Hint: step I.4.3.1
 	// YOUR CODE HERE (lab4)
-	// panic("YOUR CODE HERE")
 	// 通过 Next 函数递归执行 Executor
 	// 使用 newFirstChunk 函数来生成存储结果的 Chunk
 	err = Next(ctx, e, newFirstChunk(e))

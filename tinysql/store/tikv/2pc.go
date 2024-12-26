@@ -435,8 +435,6 @@ func (c *twoPhaseCommitter) buildPrewriteRequest(batch batchKeys) *tikvrpc.Reque
 	// Build the prewrite request from the input batch,
 	// should use `twoPhaseCommitter.primary` to ensure that the primary key is not empty.
 	// YOUR CODE HERE (lab3).
-	// panic("YOUR CODE HERE")
-
 	var mutations []*pb.Mutation
 	// 遍历批次中的所有键
 	for _, key := range batch.keys {
@@ -566,7 +564,6 @@ func (actionCommit) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch
 
 	// build and send the commit request
 	// YOUR CODE HERE (lab3).
-	// panic("YOUR CODE HERE")
 
 	// tinykv/proto/pkg/kvrpcpb/kvrpcpb.pb.go
 	req := &pb.CommitRequest{

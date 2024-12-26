@@ -60,7 +60,6 @@ func TestGetValueTs4B(t *testing.T) {
 	assert.Equal(t, []byte{42}, resp2.Value)
 }
 
-// TestGetEmpty4B tests that get on an empty DB.
 // 测试在一个空数据库上执行 get 操作
 func TestGetEmpty4B(t *testing.T) {
 	builder := newBuilder(t)
